@@ -1,0 +1,29 @@
+# HMS Phase 1 - Core Dependencies
+
+# Web framework (FastAPI backend)
+fastapi==0.104.1
+uvicorn==0.24.0
+pydantic==2.5.0
+
+# UI framework (touch-first)
+flet==0.21.2
+
+# Database (comes built-in with Python, explicit version for clarity)
+# sqlite3 (built-in, no need to install separately)
+
+# Type hints & validation
+typing-extensions==4.8.0
+pydantic-settings==2.1.0
+
+# Async support
+aiofiles==23.2.1
+httpx==0.25.1
+
+# Password hashing
+bcrypt==4.1.1
+
+# Utilities
+python-dateutil==2.8.2
+
+# Logging enhancements
+python-json-logger==2.0.7
