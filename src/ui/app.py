@@ -62,17 +62,17 @@ class HMSApp:
             selected_index=0,
             label_type=ft.NavigationRailLabelType.ALL,
             destinations=[
-                ft.NavigationDestination(
+                ft.NavigationRailDestination(
                     icon=ft.icons.SHOPPING_CART,
                     selected_icon=ft.icons.SHOPPING_CART,
                     label="POS",
                 ),
-                ft.NavigationDestination(
+                ft.NavigationRailDestination(
                     icon=ft.icons.INVENTORY_2,
                     selected_icon=ft.icons.INVENTORY_2,
                     label="Products",
                 ),
-                ft.NavigationDestination(
+                ft.NavigationRailDestination(
                     icon=ft.icons.ASSESSMENT,
                     selected_icon=ft.icons.ASSESSMENT,
                     label="Reports",

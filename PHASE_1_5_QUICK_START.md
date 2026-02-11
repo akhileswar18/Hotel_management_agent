@@ -1,6 +1,6 @@
 # Phase 1.5 Quick Start Guide
 
-## 🚀 Get Running in 3 Minutes
+## Get Running in 3 Minutes
 
 ### Step 1: Seed Sample Data
 ```bash
@@ -9,7 +9,7 @@ python scripts/seed_data.py
 
 Output:
 ```
-✅ Seeding complete!
+[OK] Seeding complete!
 
 Sample users created:
   - Username: waiter   | PIN: 1234  | Role: WAITER
@@ -25,11 +25,24 @@ python -m src
 
 Wait for:
 ```
-✓ Starting on http://127.0.0.1:8000
-Uvicorn running on http://127.0.0.1:8000
+[OK] Starting on http://127.0.0.1:8000
+INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
 ```
 
-### Step 3: Run Tests (Optional but Recommended)
+### Step 3: Start Flet UI (in a separate terminal)
+```bash
+python -m src.ui.app
+```
+
+This produces no console output. Verify it's running:
+```powershell
+# Windows PowerShell
+netstat -ano | Select-String ":8080"
+```
+
+Open in browser: **http://localhost:8080**
+
+### Step 4: Run Tests (Optional but Recommended)
 ```bash
 # In new terminal
 pytest tests/ -v
@@ -97,9 +110,9 @@ open htmlcov/index.html
 
 ## 📋 What's Implemented
 
-### ✅ Complete
-- FastAPI Backend (Phase 1)
-- Flet UI Screens (Phase 1.5)
+### Complete
+- FastAPI Backend (Phase 1) -- running on http://127.0.0.1:8000
+- Flet UI Screens (Phase 1.5) -- running on http://localhost:8080
   - Login screen with PIN keypad
   - POS order entry screen
   - Products/inventory screen
@@ -108,6 +121,7 @@ open htmlcov/index.html
 - Sample data generation
 - Full test suite (unit + integration + smoke)
 - Offline operation verified
+- All startup bugs fixed (Unicode, asyncio, Flet API compat)
 
 ### 🚧 Ready for Phase 2
 - Voice/chat assistant (code structure in place)
@@ -130,13 +144,19 @@ All with PIN: **1234**
 
 ---
 
-## 🐛 Troubleshooting
+## Troubleshooting
 
 ### Error: `Port 8000 already in use`
-Change in `.env`:
+```powershell
+# Find and kill the process (Windows)
+netstat -ano | Select-String ":8000.*LISTENING"
+taskkill /PID <pid> /T /F
 ```
-API_PORT=8001
-python -m src
+
+### Error: `Port 8080 already in use` (Flet UI)
+```powershell
+netstat -ano | Select-String ":8080.*LISTENING"
+taskkill /PID <pid> /T /F
 ```
 
 ### Error: `database is locked`
@@ -153,6 +173,12 @@ source venv/bin/activate  # macOS/Linux
 # or
 venv\Scripts\activate     # Windows
 ```
+
+### Flet UI shows no output in terminal
+This is normal. Flet 0.21.x in WEB_BROWSER mode doesn't print to console. Verify via `netstat` and open http://localhost:8080.
+
+### See also
+Full error log with all bugs and fixes: **SKILLS.md**
 
 ---
 
@@ -181,4 +207,4 @@ venv\Scripts\activate     # Windows
 
 ---
 
-**Version**: Phase 1.5 MVP | **Status**: ✅ Production Ready | **Last Updated**: 2026-02-10
+**Version**: Phase 1.5 MVP | **Status**: App Running (API :8000 + UI :8080) | **Last Updated**: 2026-02-11

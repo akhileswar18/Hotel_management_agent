@@ -1,6 +1,6 @@
 # Phase 1 (MVP) Task Breakdown & Roadmap
 
-**Version**: 1.0 | **Date**: February 9, 2026 | **Status**: Ready for Implementation
+**Version**: 1.1 | **Date**: February 11, 2026 | **Status**: Phase 1.5 UI Complete, App Running
 
 ---
 
@@ -935,15 +935,15 @@ Create touch-first, low-literacy-friendly POS UI screens.
 **Description**: Set up main Flet app, page routing, screen navigation.
 
 **Acceptance Criteria**:
-- [ ] `ui/app.py` initializes Flet app with:
+- [x] `ui/app.py` initializes Flet app with:
   - Window size (full screen recommended, min 1024x768)
   - Theme (light, dark, or system)
   - Font sizes for accessibility (base 16px, header 24px+)
   - Icon pack (Material Design icons)
-- [ ] Navigation system: ability to switch between screens (auth, POS, products, reports)
-- [ ] State management: current_user, current_order, current_screen (use simple dict or class)
+- [x] Navigation system: ability to switch between screens (auth, POS, products, reports)
+- [x] State management: current_user, current_order, current_screen (use simple dict or class)
 - [ ] Error overlay: display errors globally (top banner)
-- [ ] Startup: check if user logged in; if yes, go to POS; else go to auth
+- [x] Startup: check if user logged in; if yes, go to POS; else go to auth
 
 **File Targets**:
 - `src/ui/app.py`
@@ -955,10 +955,10 @@ Create touch-first, low-literacy-friendly POS UI screens.
 - Manual UI testing (start app, navigate between screens)
 
 **Definition of Done**:
-- [ ] App starts without errors
-- [ ] Navigation working
-- [ ] Theme applied
-- [ ] Responsive layout
+- [x] App starts without errors
+- [x] Navigation working
+- [x] Theme applied
+- [x] Responsive layout
 
 ---
 
@@ -967,16 +967,16 @@ Create touch-first, low-literacy-friendly POS UI screens.
 **Description**: Create login screen with username field, PIN keypad, login button.
 
 **Acceptance Criteria**:
-- [ ] `ui/screens/auth_screen.py` implements:
+- [x] `ui/screens/auth_screen.py` implements:
   - Username text input field (large, 20px font)
   - PIN numeric keypad (0-9, clear, backspace)
   - Large Login button (80px+ height, contrasting color)
   - Error message display (red text, if invalid PIN)
   - Loading state (disable button, show spinner during login)
-- [ ] Call `POST /api/auth/login` via FastAPI client (httpx or aiohttp)
-- [ ] On success: navigate to POS screen, store user_id + role in app state
-- [ ] On error: show error message, clear PIN field
-- [ ] Accessibility: high contrast, large fonts, clear labels
+- [x] Call `POST /api/auth/login` via FastAPI client (httpx sync)
+- [x] On success: navigate to POS screen, store user_id + role in app state
+- [x] On error: show error message, clear PIN field
+- [x] Accessibility: high contrast, large fonts, clear labels
 
 **File Targets**:
 - `src/ui/screens/auth_screen.py`
@@ -987,10 +987,10 @@ Create touch-first, low-literacy-friendly POS UI screens.
 - Manual UI testing: login with valid/invalid credentials
 
 **Definition of Done**:
-- [ ] Auth screen renders
-- [ ] Login flow works
-- [ ] Error handling visible
-- [ ] Large touch-friendly buttons
+- [x] Auth screen renders
+- [x] Login flow works
+- [x] Error handling visible
+- [x] Large touch-friendly buttons
 
 ---
 
@@ -1032,10 +1032,10 @@ Create touch-first, low-literacy-friendly POS UI screens.
 - Manual UI testing: render screen, verify layout, add items
 
 **Definition of Done**:
-- [ ] POS screen renders without errors
-- [ ] Layout responsive (left/right panels)
-- [ ] Components responsive
-- [ ] Large, accessible fonts/buttons
+- [x] POS screen renders without errors
+- [x] Layout responsive (left/right panels)
+- [x] Components responsive
+- [x] Large, accessible fonts/buttons
 
 ---
 
@@ -1060,10 +1060,10 @@ Create touch-first, low-literacy-friendly POS UI screens.
 - Integration test: create order, add 3 items, verify totals
 
 **Definition of Done**:
-- [ ] Order creation working
-- [ ] Items added successfully
-- [ ] Totals calculated correctly
-- [ ] UI updates smoothly
+- [x] Order creation working
+- [x] Items added successfully
+- [x] Totals calculated correctly
+- [x] UI updates smoothly
 
 ---
 
@@ -1099,10 +1099,10 @@ Create touch-first, low-literacy-friendly POS UI screens.
 - Integration test: apply discount, process payment, verify receipt
 
 **Definition of Done**:
-- [ ] Discount flow working
-- [ ] Payment finalization working
-- [ ] Receipt generated and displayed
-- [ ] Void confirmed and logged
+- [ ] Discount flow working (stubbed for Phase 2)
+- [x] Payment finalization working
+- [x] Receipt generated and displayed
+- [x] Void confirmed and logged
 
 ---
 
@@ -1138,10 +1138,10 @@ Create touch-first, low-literacy-friendly POS UI screens.
 - Manual UI testing: finalize order, view receipt, trigger print
 
 **Definition of Done**:
-- [ ] Receipt displays correctly
-- [ ] All details visible
-- [ ] Print stub working
-- [ ] Receipt format clear
+- [x] Receipt displays correctly
+- [x] All details visible
+- [x] Print stub working
+- [x] Receipt format clear
 
 ---
 
@@ -1177,10 +1177,10 @@ Create touch-first, low-literacy-friendly POS UI screens.
 - Manual UI testing: list products, add new product, stock-in, low-stock alert
 
 **Definition of Done**:
-- [ ] Products screen renders
-- [ ] CRUD operations working
-- [ ] Stock levels accurate
-- [ ] Low-stock alerts visible
+- [x] Products screen renders
+- [ ] CRUD operations working (stubbed for Phase 2)
+- [x] Stock levels accurate
+- [x] Low-stock alerts visible
 
 ---
 
@@ -1223,10 +1223,10 @@ Create touch-first, low-literacy-friendly POS UI screens.
 - Manual UI testing: view daily report, check totals, search by date
 
 **Definition of Done**:
-- [ ] Reports screen renders
-- [ ] Daily summary correct
-- [ ] Inventory snapshot accurate
-- [ ] Date filters working
+- [x] Reports screen renders
+- [ ] Daily summary correct (display stub, needs ReportingService)
+- [ ] Inventory snapshot accurate (display stub, needs ReportingService)
+- [ ] Date filters working (Phase 2)
 
 ---
 
@@ -1257,10 +1257,10 @@ Create touch-first, low-literacy-friendly POS UI screens.
 - Manual UI testing: test on 10" tablet, verify touch targets
 
 **Definition of Done**:
-- [ ] All buttons 56px+ height
-- [ ] Text sizes enforced
-- [ ] Layout responsive
-- [ ] High contrast verified
+- [x] All buttons 56px+ height
+- [x] Text sizes enforced
+- [x] Layout responsive
+- [x] High contrast verified
 
 ---
 
@@ -1291,10 +1291,10 @@ Create touch-first, low-literacy-friendly POS UI screens.
 - Manual UI testing: trigger errors (network offline, invalid input), verify feedback
 
 **Definition of Done**:
-- [ ] Loading spinners visible
-- [ ] Error messages clear
-- [ ] Recovery options available
-- [ ] Success feedback visible
+- [x] Loading spinners visible
+- [x] Error messages clear
+- [ ] Recovery options available (partial, Phase 2)
+- [x] Success feedback visible
 
 ---
 
@@ -1739,13 +1739,13 @@ Every task must meet these criteria before marked "Done":
 
 | Epic | Stories | Tasks | Effort (Days) | Timeline |
 |---|---|---|---|---|
-| 1 (Setup) | 1 | 3 | 2–3 | Week 1 |
-| 2 (DB) | 2 | 6 | 4–5 | Weeks 1–2 |
-| 3 (Backend) | 4 | 15 | 12–15 | Weeks 2–4 |
-| 4 (UI) | 5 | 12 | 10–12 | Weeks 3–5 |
-| 5 (Logging) | 2 | 2 | 2–3 | Week 5 |
-| 6 (Testing + Deploy) | 5 | 10 | 8–10 | Weeks 5–6 |
-| **Total** | **19** | **48** | **38–48 days** | **8–10 weeks** |
+| 1 (Setup) | 1 | 3 | 2–3 | DONE |
+| 2 (DB) | 2 | 6 | 4–5 | DONE |
+| 3 (Backend) | 4 | 15 | 12–15 | DONE (80%) |
+| 4 (UI) | 5 | 12 | 10–12 | DONE (screens running) |
+| 5 (Logging) | 2 | 2 | 2–3 | DONE |
+| 6 (Testing + Deploy) | 5 | 10 | 8–10 | IN PROGRESS |
+| **Total** | **19** | **48** | **38–48 days** | **Phase 1.5 complete** |
 
 **Assumptions**:
 - 1 developer working full-time
@@ -1784,5 +1784,5 @@ Every task must meet these criteria before marked "Done":
 
 ---
 
-**Status**: ✅ **Ready for Implementation** | **Last Updated**: 2026-02-09
+**Status**: Phase 1.5 UI Complete, App Running (API :8000 + UI :8080) | **Last Updated**: 2026-02-11
 

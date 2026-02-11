@@ -2,7 +2,7 @@
 
 **Purpose**: Track errors encountered during development and their fixes for future reference.
 
-**Last Updated**: 2026-02-10
+**Last Updated**: 2026-02-11
 
 ---
 
@@ -186,6 +186,118 @@ style=ft.ButtonStyle(
 
 ---
 
+### 7. UnicodeEncodeError in __main__.py (App Entry Point)
+
+**File**: `src/__main__.py`
+
+**Error**:
+```
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2713' in position 6: character maps to <undefined>
+```
+
+**Root Cause**: Same Windows cp1252 encoding issue as Error #1, but in the main entry point. The print statements used Unicode checkmark and cross symbols that crash on Windows terminal.
+
+**Solution**:
+- Replaced `print("      [OK] ...")` for success and `print("      [FAIL] ...")` for errors
+- `[OK]` replaces checkmark, `[FAIL]` replaces cross
+
+**Files Modified**:
+- src/__main__.py (lines 40, 42, 49, 52, 58, 63)
+
+**Prevention**: Same as Error #1. Always use ASCII in print/stdout on Windows.
+
+---
+
+### 8. asyncio.run() Conflicts with Flet Event Loop
+
+**Files**: `src/ui/screens/auth_screen.py`, `pos_screen.py`, `products_screen.py`, `reports_screen.py`
+
+**Error**:
+App hangs silently or crashes with `RuntimeError: This event loop is already running`.
+
+**Root Cause**: Flet runs its own asyncio event loop internally. Calling `asyncio.run()` inside a Flet callback or `__init__` creates a nested event loop conflict. All screen constructors and event handlers used `httpx.AsyncClient` with `asyncio.run()`.
+
+**Solution**:
+Replace all async HTTP calls with synchronous `httpx.Client`:
+```python
+# Wrong (crashes inside Flet):
+async def _load_items(self):
+    async with httpx.AsyncClient() as client:
+        response = await client.get(url)
+asyncio.run(self._load_items())
+
+# Correct (works inside Flet):
+def _load_items(self):
+    with httpx.Client(timeout=5.0) as client:
+        response = client.get(url)
+```
+
+**Files Modified**:
+- src/ui/screens/auth_screen.py (login handler)
+- src/ui/screens/pos_screen.py (load items, new order, add item, finalize)
+- src/ui/screens/products_screen.py (load items)
+- src/ui/screens/reports_screen.py (load reports, refresh)
+
+**Prevention**: Never use `asyncio.run()` inside Flet apps. Use synchronous `httpx.Client` for HTTP calls in Flet event handlers and constructors.
+
+---
+
+### 9. Column.__init__() Got Unexpected Keyword Argument 'padding'
+
+**Files**: All screen files (`auth_screen.py`, `pos_screen.py`, `products_screen.py`, `reports_screen.py`, `receipt_screen.py`)
+
+**Error**:
+```
+Column.__init__() got an unexpected keyword argument 'padding'
+```
+
+**Root Cause**: In Flet 0.21.x, `ft.Column` does not accept a `padding` parameter. All screens extended `ft.Column` and passed `padding=20` to `super().__init__()`.
+
+**Solution**:
+Remove `padding` from Column init. If padding is needed, wrap in `ft.Container(padding=20)` instead.
+```python
+# Wrong:
+super().__init__([...], spacing=10, padding=20, expand=True)
+
+# Correct:
+super().__init__([...], spacing=10, expand=True)
+```
+
+**Files Modified**:
+- src/ui/screens/auth_screen.py
+- src/ui/screens/pos_screen.py
+- src/ui/screens/products_screen.py
+- src/ui/screens/reports_screen.py
+- src/ui/screens/receipt_screen.py
+
+**Prevention**: Check Flet API docs for the installed version. `ft.Column` and `ft.Row` do not accept `padding` -- only `ft.Container` does.
+
+---
+
+### 10. Wrong NavigationDestination Class for NavigationRail
+
+**File**: `src/ui/app.py`
+
+**Error**: NavigationRail doesn't render correctly or throws runtime error.
+
+**Root Cause**: `ft.NavigationRail` requires `ft.NavigationRailDestination`, not `ft.NavigationDestination`. The latter is for `ft.NavigationBar`.
+
+**Solution**:
+```python
+# Wrong:
+ft.NavigationRail(destinations=[ft.NavigationDestination(...)])
+
+# Correct:
+ft.NavigationRail(destinations=[ft.NavigationRailDestination(...)])
+```
+
+**Files Modified**:
+- src/ui/app.py (3 destinations changed)
+
+**Prevention**: Use `ft.NavigationRailDestination` for `NavigationRail` and `ft.NavigationDestination` for `NavigationBar`.
+
+---
+
 ## Testing Results Summary
 
 | Component | Status | Notes |
@@ -193,7 +305,8 @@ style=ft.ButtonStyle(
 | **Unit Tests** | ✅ 22/22 PASSING | All domain logic tests pass |
 | **Database Seeding** | ✅ COMPLETE | 4 users, 10 items, 8 tables, stock created |
 | **API Server** | ✅ RUNNING | FastAPI on port 8000 |
-| **Flet UI** | ✅ FIXED | ButtonStyle issue resolved |
+| **Flet UI** | ✅ RUNNING | All screens load, login screen visible at http://localhost:8080 |
+| **Flet UI Bugs Fixed** | ✅ FIXED | asyncio.run, Column padding, NavigationRailDestination, ButtonStyle |
 | **Integration Tests** | ⚠️ Mixed | Some file locking issues on Windows |
 | **Smoke Tests** | ⚠️ Mixed | Same teardown issues |
 
@@ -211,6 +324,12 @@ style=ft.ButtonStyle(
 
 5. **Framework Compatibility**: Different Flet versions have different APIs. Check documentation for the installed version.
 
+6. **Flet Event Loop**: Never use `asyncio.run()` inside Flet apps. Use synchronous HTTP clients instead.
+
+7. **Flet Column vs Container**: `ft.Column` does not accept `padding` -- wrap in `ft.Container` for padding.
+
+8. **NavigationRail vs NavigationBar**: Use `NavigationRailDestination` for `NavigationRail`, `NavigationDestination` for `NavigationBar`.
+
 ---
 
 ## Prevention Best Practices
@@ -221,6 +340,9 @@ style=ft.ButtonStyle(
 ✅ Verify import paths before writing tests
 ✅ Check framework documentation for your version
 ✅ Test UI components early in development
+✅ Never use asyncio.run() inside Flet (use sync httpx.Client)
+✅ Use ft.Container for padding, not ft.Column
+✅ Use NavigationRailDestination for NavigationRail
 
 ---
 
@@ -236,4 +358,4 @@ All code is marked with `# TODO:` comments for Phase 2 work.
 
 ---
 
-**Status**: ✅ All Phase 1.5 critical errors resolved | Ready for production testing
+**Status**: ✅ All Phase 1.5 critical errors resolved (10 total) | App running: API on :8000, UI on :8080

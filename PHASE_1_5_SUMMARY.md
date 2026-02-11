@@ -288,13 +288,14 @@ pytest tests/smoke/ -v
 pytest tests/ --cov=src --cov-report=html
 ```
 
-### 4️⃣ **Run Flet UI** (Phase 1.5+)
+### 4️⃣ **Run Flet UI** (in a separate terminal)
 ```bash
-# Once Flet is integrated with Uvicorn
-python src/ui/app.py
+python -m src.ui.app
 ```
 
-Opens browser at http://127.0.0.1:8080
+Opens browser at http://localhost:8080
+
+**Note**: The API backend (Step 1) must be running first. The Flet process produces no console output -- verify via `netstat -ano | Select-String ":8080"` on Windows.
 
 ---
 
@@ -430,8 +431,8 @@ curl -X POST http://127.0.0.1:8000/api/sales/orders/{order_id}/finalize \
 
 ### 🏗️ Architecture
 - **Separation of Concerns**: UI screens separate from API
-- **API-Driven**: Screens call FastAPI endpoints
-- **Async Operations**: Non-blocking API calls
+- **API-Driven**: Screens call FastAPI endpoints via sync `httpx.Client`
+- **Synchronous HTTP**: Flet runs its own event loop; all API calls use synchronous `httpx.Client` (not async)
 - **Error Handling**: User-friendly error dialogs
 
 ### 🧪 Testing
@@ -452,6 +453,17 @@ curl -X POST http://127.0.0.1:8000/api/sales/orders/{order_id}/finalize \
 6. **Voice Integration**: Structure ready for Phase 2
 
 **All limitations are marked with `# TODO:` comments in code.**
+
+## 🔧 Bugs Fixed (2026-02-11)
+
+| Bug | Root Cause | Fix Applied |
+|-----|-----------|-------------|
+| `UnicodeEncodeError` in `__main__.py` | Windows cp1252 can't render Unicode symbols | Replaced with ASCII `[OK]`/`[FAIL]` |
+| App hangs on UI launch | `asyncio.run()` conflicts with Flet event loop | Switched to sync `httpx.Client` |
+| `Column padding` error | `ft.Column` doesn't accept `padding` in Flet 0.21.x | Removed `padding` from Column init |
+| NavigationRail broken | Used `NavigationDestination` instead of `NavigationRailDestination` | Fixed class name |
+
+See `SKILLS.md` for full error details (errors #7-#10).
 
 ---
 
@@ -507,8 +519,10 @@ After Phase 1.5, the following features should be added:
 
 ### To Test Phase 1.5
 1. Run `python scripts/seed_data.py`
-2. Run `python -m src`
-3. Run `pytest tests/ -v` to verify functionality
+2. Run `python -m src` (API backend on port 8000)
+3. Run `python -m src.ui.app` in a separate terminal (Flet UI on port 8080)
+4. Open http://localhost:8080 in browser
+5. Run `pytest tests/ -v` to verify functionality
 
 ### To Continue to Phase 2
 1. Implement voice integration (in `src/application/`)

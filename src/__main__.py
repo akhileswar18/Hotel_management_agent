@@ -37,29 +37,29 @@ def main() -> None:
     print("[1/3] Initializing database...")
     try:
         db = Database()
-        print("      ✓ Database initialized")
+        print("      [OK] Database initialized")
     except Exception as e:
-        print(f"      ✗ Database initialization failed: {e}")
+        print(f"      [FAIL] Database initialization failed: {e}")
         sys.exit(1)
 
     # Initialize logging
     print("[2/3] Initializing logging...")
     try:
         # TODO: Set up structured logging
-        print("      ✓ Logging initialized")
+        print("      [OK] Logging initialized")
     except Exception as e:
-        print(f"      ✗ Logging initialization failed: {e}")
+        print(f"      [FAIL] Logging initialization failed: {e}")
         sys.exit(1)
 
     # Start FastAPI server
     print("[3/3] Starting FastAPI server...")
     try:
         import uvicorn
-        print("      ✓ Starting on http://127.0.0.1:8000")
+        print("      [OK] Starting on http://127.0.0.1:8000")
         print()
         uvicorn.run(app, host="127.0.0.1", port=8000)
     except Exception as e:
-        print(f"      ✗ Server startup failed: {e}")
+        print(f"      [FAIL] Server startup failed: {e}")
         sys.exit(1)
 
 

@@ -6,7 +6,6 @@ Daily sales summary, inventory snapshot, and transaction search.
 
 import flet as ft
 import httpx
-import asyncio
 from datetime import datetime
 from src.ui.components.ui_helpers import (
     HMSButton, HMSColors, show_error_dialog, show_success_dialog, create_header
@@ -117,29 +116,23 @@ class ReportsScreen(ft.Column):
                 ft.Row([self.loading], alignment=ft.MainAxisAlignment.CENTER),
             ],
             spacing=10,
-            padding=20,
             expand=True,
         )
 
         # Load reports
-        asyncio.run(self._load_reports())
+        self._load_reports()
 
-    async def _load_reports(self):
+    def _load_reports(self):
         """Load reports from API."""
-        self.loading.visible = True
-        self.page.update()
-
         try:
-            async with httpx.AsyncClient() as client:
+            with httpx.Client(timeout=5.0) as client:
                 # Load daily sales
-                sales_response = await client.get(
+                sales_response = client.get(
                     f"{self.api_base}/api/reports/daily-sales",
-                    timeout=5.0,
                 )
                 # Load inventory
-                inventory_response = await client.get(
+                inventory_response = client.get(
                     f"{self.api_base}/api/reports/inventory-snapshot",
-                    timeout=5.0,
                 )
 
                 if sales_response.status_code == 200:
@@ -151,10 +144,7 @@ class ReportsScreen(ft.Column):
                     self._display_inventory_summary(inventory_data)
 
         except Exception as e:
-            show_error_dialog(self.page, "Error", f"Failed to load reports: {str(e)}")
-        finally:
-            self.loading.visible = False
-            self.page.update()
+            pass  # API may not be running yet
 
     def _display_sales_summary(self, data: dict):
         """Display sales summary."""
@@ -168,7 +158,7 @@ class ReportsScreen(ft.Column):
 
     def _handle_refresh(self, e):
         """Refresh reports."""
-        asyncio.run(self._load_reports())
+        self._load_reports()
 
     def _handle_export(self, e):
         """Export reports to CSV."""

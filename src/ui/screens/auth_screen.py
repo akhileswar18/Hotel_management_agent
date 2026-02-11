@@ -6,7 +6,6 @@ PIN-based login for staff. Minimal friction, large touch targets.
 
 import flet as ft
 import httpx
-import asyncio
 from src.ui.components.ui_helpers import (
     HMSButton, NumericKeypad, HMSColors, show_error_dialog, show_success_dialog
 )
@@ -94,7 +93,6 @@ class AuthScreen(ft.Column):
             alignment=ft.MainAxisAlignment.START,
             horizontal_alignment=ft.CrossAxisAlignment.CENTER,
             spacing=10,
-            padding=20,
             expand=True,
         )
 
@@ -120,8 +118,8 @@ class AuthScreen(ft.Column):
         self.pin_display.update()
         self.login_button.update()
 
-    async def _handle_login_async(self):
-        """Async login handler."""
+    def _handle_login(self, e):
+        """Handle login button click."""
         username = self.username_field.value.strip()
         pin = self.pin_value
 
@@ -138,20 +136,16 @@ class AuthScreen(ft.Column):
         self._page.update()
 
         try:
-            async with httpx.AsyncClient() as client:
-                response = await client.post(
+            with httpx.Client(timeout=5.0) as client:
+                response = client.post(
                     f"{self.api_base}/api/auth/login",
                     json={"username": username, "pin": pin},
-                    timeout=5.0,
                 )
 
                 if response.status_code == 200:
                     user_data = response.json()
-                    show_success_dialog(
-                        self._page,
-                        "Login Successful",
-                        f"Welcome {user_data.get('username')}!"
-                    )
+                    self.loading.visible = False
+                    self._page.update()
                     # Trigger success callback
                     self.on_login_success(user_data)
                 else:
@@ -161,20 +155,15 @@ class AuthScreen(ft.Column):
                         "Login Failed",
                         error_data.get("detail", "Invalid credentials")
                     )
-        except Exception as e:
+        except Exception as ex:
             show_error_dialog(
                 self._page,
                 "Connection Error",
-                f"Failed to connect: {str(e)}"
+                f"Failed to connect: {str(ex)}"
             )
         finally:
             self.loading.visible = False
             self._page.update()
-
-    def _handle_login(self, e):
-        """Handle login button click."""
-        # Run async login in event loop
-        asyncio.run(self._handle_login_async())
 
 
 # TODO: Add offline login (cache credentials)

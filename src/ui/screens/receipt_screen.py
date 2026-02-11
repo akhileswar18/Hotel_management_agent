@@ -76,7 +76,6 @@ class ReceiptScreen(ft.Column):
                 ),
             ],
             spacing=10,
-            padding=20,
             expand=True,
         )
 

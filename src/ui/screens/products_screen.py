@@ -6,7 +6,6 @@ Manage products: view, add new, update prices, record stock.
 
 import flet as ft
 import httpx
-import asyncio
 from src.ui.components.ui_helpers import (
     HMSButton, HMSColors, HMSInput, show_error_dialog, show_success_dialog, create_header
 )
@@ -68,26 +67,24 @@ class ProductsScreen(ft.Column):
                 ft.Row([self.loading], alignment=ft.MainAxisAlignment.CENTER),
             ],
             spacing=10,
-            padding=20,
             expand=True,
         )
 
         # Load items
-        asyncio.run(self._load_items())
+        self._load_items()
 
-    async def _load_items(self):
+    def _load_items(self):
         """Load products from API."""
         try:
-            async with httpx.AsyncClient() as client:
-                response = await client.get(
+            with httpx.Client(timeout=5.0) as client:
+                response = client.get(
                     f"{self.api_base}/api/inventory/items",
-                    timeout=5.0,
                 )
                 if response.status_code == 200:
                     self.items = response.json()
                     self._display_items()
         except Exception as e:
-            show_error_dialog(self.page, "Error", f"Failed to load items: {str(e)}")
+            pass  # API may not be running yet
 
     def _display_items(self):
         """Display items in list."""

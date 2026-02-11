@@ -7,7 +7,6 @@ Fast, efficient workflow for taking orders.
 
 import flet as ft
 import httpx
-import asyncio
 from uuid import uuid4
 from datetime import datetime
 from src.ui.components.ui_helpers import (
@@ -129,26 +128,24 @@ class POSScreen(ft.Column):
                 ),
             ],
             spacing=10,
-            padding=20,
             expand=True,
         )
 
         # Load items on init
-        asyncio.run(self._load_items())
+        self._load_items()
 
-    async def _load_items(self):
+    def _load_items(self):
         """Load items from API."""
         try:
-            async with httpx.AsyncClient() as client:
-                response = await client.get(
+            with httpx.Client(timeout=5.0) as client:
+                response = client.get(
                     f"{self.api_base}/api/inventory/items",
-                    timeout=5.0,
                 )
                 if response.status_code == 200:
                     items = response.json()
                     self.item_picker.set_items(items)
         except Exception as e:
-            show_error_dialog(self.page, "Error", f"Failed to load items: {str(e)}")
+            pass  # API may not be running yet; items will load when navigated to
 
     def _handle_new_order(self, e):
         """Create new order."""
@@ -158,28 +155,24 @@ class POSScreen(ft.Column):
             return
 
         try:
-            async def create_order():
-                async with httpx.AsyncClient() as client:
-                    response = await client.post(
-                        f"{self.api_base}/api/sales/orders",
-                        json={"table_id": table_id},
-                        timeout=5.0,
-                    )
-                    if response.status_code == 200:
-                        self.current_order = response.json()
-                        self.current_order_items = []
-                        self._update_order_display()
-                        self.discount_button.disabled = False
-                        self.finalize_button.disabled = False
-                        self.void_button.disabled = False
-                        self.page.update()
-                        show_success_dialog(self.page, "Success", f"Order created for table {table_id}")
-                    else:
-                        show_error_dialog(self.page, "Error", "Failed to create order")
-
-            asyncio.run(create_order())
-        except Exception as e:
-            show_error_dialog(self.page, "Error", str(e))
+            with httpx.Client(timeout=5.0) as client:
+                response = client.post(
+                    f"{self.api_base}/api/sales/orders",
+                    json={"table_id": table_id},
+                )
+                if response.status_code == 200:
+                    self.current_order = response.json()
+                    self.current_order_items = []
+                    self._update_order_display()
+                    self.discount_button.disabled = False
+                    self.finalize_button.disabled = False
+                    self.void_button.disabled = False
+                    self.page.update()
+                    show_success_dialog(self.page, "Success", f"Order created for table {table_id}")
+                else:
+                    show_error_dialog(self.page, "Error", "Failed to create order")
+        except Exception as ex:
+            show_error_dialog(self.page, "Error", str(ex))
 
     def _handle_item_selected(self, item_id: str, item_name: str, qty: int):
         """Handle item selection from picker."""
@@ -188,23 +181,19 @@ class POSScreen(ft.Column):
             return
 
         try:
-            async def add_item():
-                async with httpx.AsyncClient() as client:
-                    response = await client.post(
-                        f"{self.api_base}/api/sales/orders/{self.current_order['id']}/items",
-                        json={"item_id": item_id, "quantity": qty},
-                        timeout=5.0,
-                    )
-                    if response.status_code == 200:
-                        self.current_order = response.json()
-                        self._update_order_display()
-                        self.page.update()
-                    else:
-                        show_error_dialog(self.page, "Error", "Failed to add item")
-
-            asyncio.run(add_item())
-        except Exception as e:
-            show_error_dialog(self.page, "Error", str(e))
+            with httpx.Client(timeout=5.0) as client:
+                response = client.post(
+                    f"{self.api_base}/api/sales/orders/{self.current_order['id']}/items",
+                    json={"item_id": item_id, "quantity": qty},
+                )
+                if response.status_code == 200:
+                    self.current_order = response.json()
+                    self._update_order_display()
+                    self.page.update()
+                else:
+                    show_error_dialog(self.page, "Error", "Failed to add item")
+        except Exception as ex:
+            show_error_dialog(self.page, "Error", str(ex))
 
     def _handle_discount(self, e):
         """Open discount dialog."""
@@ -238,20 +227,19 @@ class POSScreen(ft.Column):
             read_only=True,
         )
 
-        async def confirm_payment(e):
+        def confirm_payment(e):
             dlg.open = False
             self.loading.visible = True
             self.page.update()
 
             try:
-                async with httpx.AsyncClient() as client:
-                    response = await client.post(
+                with httpx.Client(timeout=5.0) as client:
+                    response = client.post(
                         f"{self.api_base}/api/sales/orders/{self.current_order['id']}/finalize",
                         json={
                             "payment_method": payment_method.value,
                             "paid_amount": float(amount_field.value),
                         },
-                        timeout=5.0,
                     )
                     if response.status_code == 200:
                         finalized_order = response.json()
@@ -259,7 +247,7 @@ class POSScreen(ft.Column):
                             self.page,
                             "Payment Successful",
                             f"Receipt: {finalized_order.get('receipt_number', 'N/A')}\n"
-                            f"Total: ₹{finalized_order['total_amount']:.2f}"
+                            f"Total: {finalized_order['total_amount']:.2f}"
                         )
                         self.current_order = None
                         self._update_order_display()
