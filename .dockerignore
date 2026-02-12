@@ -1,0 +1,82 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# HMS Docker Ignore
+# Exclude files that should not be copied into the Docker image.
+# ──────────────────────────────────────────────────────────────────────────────
+
+# Version control
+.git
+.gitignore
+
+# Virtual environment
+venv/
+env/
+ENV/
+
+# IDE / editor
+.vscode/
+.idea/
+.cursor/
+*.swp
+*.swo
+*~
+
+# Python cache
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.hypothesis/
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+*.egg
+*.spec
+
+# Test & coverage
+tests/
+htmlcov/
+.coverage
+coverage.xml
+
+# Database files (will be created at runtime)
+*.db
+*.db-shm
+*.db-wal
+hms.db
+
+# Log files
+logs/
+*.log
+
+# Environment (secrets)
+.env
+.env.local
+.env.*.local
+
+# Documentation (not needed in image)
+*.md
+!README.md
+specs/
+ARCHITECTURE.md
+TESTING.md
+constitution.md
+specification.md
+
+# Dev dependencies file
+requirements-dev.txt
+Makefile
+
+# OS artifacts
+.DS_Store
+Thumbs.db
+
+# Temp files
+*.tmp
+*.bak
+tmpclaude-*
+
+# Generated reports
+*.csv

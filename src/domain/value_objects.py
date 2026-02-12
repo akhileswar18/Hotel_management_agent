@@ -13,6 +13,7 @@ from typing import Union
 class OrderStatus(str, Enum):
     """Immutable order status enum."""
     DRAFT = "draft"
+    HELD = "held"
     FINALIZED = "finalized"
     VOIDED = "voided"
 

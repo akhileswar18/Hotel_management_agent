@@ -79,6 +79,20 @@ class POSScreen(ft.Column):
             color=HMSColors.ERROR,
         )
 
+        self.hold_button = HMSButton(
+            "Hold Order",
+            self._handle_hold,
+            width=130,
+            color=HMSColors.WARNING,
+        )
+
+        self.resume_button = HMSButton(
+            "Resume Held",
+            self._handle_resume_held,
+            width=130,
+            color=HMSColors.PRIMARY,
+        )
+
         self.logout_button = HMSButton(
             "Logout",
             self._handle_logout,
@@ -89,6 +103,13 @@ class POSScreen(ft.Column):
         self.discount_button.disabled = True
         self.finalize_button.disabled = True
         self.void_button.disabled = True
+        self.hold_button.disabled = True
+
+        # Role-based visibility: hide discount and void for waiters
+        user_role = user_info.get("role", "WAITER").upper()
+        if user_role == "WAITER":
+            self.discount_button.visible = False
+            self.void_button.visible = False
 
         self.loading = ft.ProgressRing(visible=False)
 
@@ -119,6 +140,8 @@ class POSScreen(ft.Column):
                     [
                         self.discount_button,
                         self.finalize_button,
+                        self.hold_button,
+                        self.resume_button,
                         self.void_button,
                         ft.Container(expand=True),
                         self.loading,
@@ -158,7 +181,7 @@ class POSScreen(ft.Column):
             with httpx.Client(timeout=5.0) as client:
                 response = client.post(
                     f"{self.api_base}/api/sales/orders",
-                    json={"table_id": table_id},
+                    json={"table_id": table_id, "user_id": self.user_info.get("user_id")},
                 )
                 if response.status_code == 200:
                     self.current_order = response.json()
@@ -167,6 +190,7 @@ class POSScreen(ft.Column):
                     self.discount_button.disabled = False
                     self.finalize_button.disabled = False
                     self.void_button.disabled = False
+                    self.hold_button.disabled = False
                     self.page.update()
                     show_success_dialog(self.page, "Success", f"Order created for table {table_id}")
                 else:
@@ -184,7 +208,7 @@ class POSScreen(ft.Column):
             with httpx.Client(timeout=5.0) as client:
                 response = client.post(
                     f"{self.api_base}/api/sales/orders/{self.current_order['id']}/items",
-                    json={"item_id": item_id, "quantity": qty},
+                    json={"item_id": item_id, "quantity": qty, "user_id": self.user_info.get("user_id")},
                 )
                 if response.status_code == 200:
                     self.current_order = response.json()
@@ -196,13 +220,90 @@ class POSScreen(ft.Column):
             show_error_dialog(self.page, "Error", str(ex))
 
     def _handle_discount(self, e):
-        """Open discount dialog."""
+        """Open discount dialog and apply via API."""
         if not self.current_order:
             show_error_dialog(self.page, "Error", "Create an order first")
             return
 
-        # TODO: Implement discount dialog
-        show_error_dialog(self.page, "Coming Soon", "Discount feature coming in Phase 2")
+        if self.current_order.get("subtotal", 0) == 0:
+            show_error_dialog(self.page, "Error", "Add items before applying discount")
+            return
+
+        discount_type = ft.Dropdown(
+            label="Discount Type",
+            options=[
+                ft.dropdown.Option("percentage", "Percentage (%)"),
+                ft.dropdown.Option("absolute", "Absolute (₹)"),
+            ],
+            value="percentage",
+            width=250,
+        )
+
+        discount_value = ft.TextField(
+            label="Discount Value",
+            hint_text="e.g. 10 for 10%",
+            keyboard_type=ft.KeyboardType.NUMBER,
+            width=250,
+            value="",
+        )
+
+        def confirm_discount(e):
+            val = discount_value.value.strip()
+            if not val:
+                return
+            try:
+                amount = float(val)
+            except ValueError:
+                show_error_dialog(self.page, "Error", "Enter a valid number")
+                return
+
+            dlg.open = False
+            self.page.update()
+
+            try:
+                with httpx.Client(timeout=5.0) as client:
+                    response = client.patch(
+                        f"{self.api_base}/api/sales/orders/{self.current_order['id']}/discount",
+                        json={
+                            "discount_type": discount_type.value,
+                            "amount": amount,
+                            "user_id": self.user_info.get("user_id"),
+                        },
+                    )
+                    if response.status_code == 200:
+                        self.current_order = response.json()
+                        self._update_order_display()
+                        self.page.update()
+                        show_success_dialog(self.page, "Discount Applied",
+                            f"Discount of {amount}{'%' if discount_type.value == 'percentage' else ' ₹'} applied")
+                    else:
+                        detail = response.json().get("detail", "Failed to apply discount")
+                        show_error_dialog(self.page, "Error", detail)
+            except Exception as err:
+                show_error_dialog(self.page, "Error", str(err))
+
+        dlg = ft.AlertDialog(
+            title=ft.Text("Apply Discount"),
+            content=ft.Column([
+                discount_type,
+                discount_value,
+                ft.Text(f"Subtotal: ₹{self.current_order.get('subtotal', 0):.2f}", size=14),
+                ft.Text("Max percentage: 50%", size=12, color=HMSColors.TEXT_SECONDARY),
+            ], tight=True, spacing=12),
+            actions=[
+                ft.TextButton("Cancel", on_click=lambda e: _close(dlg)),
+                ft.ElevatedButton("Apply", on_click=confirm_discount,
+                    bgcolor=HMSColors.WARNING, color=HMSColors.TEXT_LIGHT),
+            ],
+        )
+
+        def _close(d):
+            d.open = False
+            self.page.update()
+
+        self.page.dialog = dlg
+        dlg.open = True
+        self.page.update()
 
     def _handle_finalize(self, e):
         """Finalize order and open payment dialog."""
@@ -239,6 +340,7 @@ class POSScreen(ft.Column):
                         json={
                             "payment_method": payment_method.value,
                             "paid_amount": float(amount_field.value),
+                            "user_id": self.user_info.get("user_id"),
                         },
                     )
                     if response.status_code == 200:
@@ -285,29 +387,306 @@ class POSScreen(ft.Column):
         self.page.update()
 
     def _handle_void(self, e):
-        """Void current order."""
+        """Void current order via API with confirmation."""
         if not self.current_order:
             show_error_dialog(self.page, "Error", "No active order to void")
             return
 
-        show_success_dialog(self.page, "Order Voided", "Order has been voided (logged)")
-        self.current_order = None
-        self._update_order_display()
+        reason_field = ft.TextField(
+            label="Reason for voiding",
+            hint_text="e.g. Customer changed mind",
+            multiline=True,
+            min_lines=2,
+            max_lines=4,
+            width=350,
+        )
+
+        def confirm_void(e):
+            reason = reason_field.value.strip() or "No reason provided"
+            dlg.open = False
+            self.page.update()
+
+            try:
+                with httpx.Client(timeout=5.0) as client:
+                    response = client.post(
+                        f"{self.api_base}/api/sales/orders/{self.current_order['id']}/void",
+                        json={
+                            "reason": reason,
+                            "user_id": self.user_info.get("user_id"),
+                        },
+                    )
+                    if response.status_code == 200:
+                        show_success_dialog(self.page, "Order Voided",
+                            f"Order has been voided.\nReason: {reason}")
+                        self.current_order = None
+                        self.discount_button.disabled = True
+                        self.finalize_button.disabled = True
+                        self.void_button.disabled = True
+                        self._update_order_display()
+                        self.page.update()
+                    else:
+                        detail = response.json().get("detail", "Failed to void order")
+                        show_error_dialog(self.page, "Error", detail)
+            except Exception as err:
+                show_error_dialog(self.page, "Error", str(err))
+
+        dlg = ft.AlertDialog(
+            title=ft.Text("Void Order"),
+            content=ft.Column([
+                ft.Text(
+                    "Are you sure you want to void this order? This action is logged and cannot be undone.",
+                    size=14,
+                    color=HMSColors.ERROR,
+                ),
+                reason_field,
+            ], tight=True, spacing=12),
+            actions=[
+                ft.TextButton("Cancel", on_click=lambda e: _close(dlg)),
+                ft.ElevatedButton("Void Order", on_click=confirm_void,
+                    bgcolor=HMSColors.ERROR, color=HMSColors.TEXT_LIGHT),
+            ],
+        )
+
+        def _close(d):
+            d.open = False
+            self.page.update()
+
+        self.page.dialog = dlg
+        dlg.open = True
+        self.page.update()
+
+    def _handle_hold(self, e):
+        """Put current order on hold."""
+        if not self.current_order:
+            return
+        try:
+            with httpx.Client(timeout=5.0) as client:
+                response = client.post(
+                    f"{self.api_base}/api/sales/orders/{self.current_order['id']}/hold",
+                    json={"user_id": self.user_info.get("user_id")},
+                )
+                if response.status_code == 200:
+                    show_success_dialog(self.page, "Order Held", "Order has been put on hold.")
+                    self.current_order = None
+                    self.discount_button.disabled = True
+                    self.finalize_button.disabled = True
+                    self.void_button.disabled = True
+                    self.hold_button.disabled = True
+                    self._update_order_display()
+                    self.page.update()
+                else:
+                    detail = response.json().get("detail", "Failed to hold order")
+                    show_error_dialog(self.page, "Error", detail)
+        except Exception as ex:
+            show_error_dialog(self.page, "Error", str(ex))
+
+    def _handle_resume_held(self, e):
+        """Show a dialog to pick a held order and resume it."""
+        try:
+            with httpx.Client(timeout=5.0) as client:
+                response = client.get(
+                    f"{self.api_base}/api/sales/orders",
+                    params={"status": "held"},
+                )
+                if response.status_code == 200:
+                    held_orders = response.json()
+                    if not held_orders:
+                        show_error_dialog(self.page, "No Held Orders", "There are no orders on hold.")
+                        return
+                    self._show_resume_dialog(held_orders)
+        except Exception as ex:
+            show_error_dialog(self.page, "Error", str(ex))
+
+    def _show_resume_dialog(self, held_orders: list):
+        """Show dialog listing held orders to resume."""
+        order_options = []
+        for o in held_orders:
+            items_count = len(o.get("line_items", []))
+            label = f"Table {o.get('table_id', '?')} — {items_count} items — ₹{o.get('total_amount', 0):.2f}"
+            order_options.append(ft.dropdown.Option(o["id"], label))
+
+        order_dropdown = ft.Dropdown(
+            label="Select order to resume",
+            options=order_options,
+            value=held_orders[0]["id"] if held_orders else None,
+            width=400,
+        )
+
+        def confirm_resume(ev):
+            dlg.open = False
+            self.page.update()
+            if not order_dropdown.value:
+                return
+            try:
+                with httpx.Client(timeout=5.0) as client:
+                    response = client.post(
+                        f"{self.api_base}/api/sales/orders/{order_dropdown.value}/resume",
+                        json={"user_id": self.user_info.get("user_id")},
+                    )
+                    if response.status_code == 200:
+                        self.current_order = response.json()
+                        self._update_order_display()
+                        self.discount_button.disabled = False
+                        self.finalize_button.disabled = False
+                        self.void_button.disabled = False
+                        self.hold_button.disabled = False
+                        self.page.update()
+                        show_success_dialog(self.page, "Order Resumed",
+                            f"Order for table {self.current_order.get('table_id', '?')} resumed.")
+                    else:
+                        detail = response.json().get("detail", "Failed to resume order")
+                        show_error_dialog(self.page, "Error", detail)
+            except Exception as err:
+                show_error_dialog(self.page, "Error", str(err))
+
+        dlg = ft.AlertDialog(
+            title=ft.Text("Resume Held Order"),
+            content=ft.Column([order_dropdown], tight=True),
+            actions=[
+                ft.TextButton("Cancel", on_click=lambda e: _close(dlg)),
+                ft.ElevatedButton("Resume", on_click=confirm_resume,
+                    bgcolor=HMSColors.PRIMARY, color=HMSColors.TEXT_LIGHT),
+            ],
+        )
+
+        def _close(d):
+            d.open = False
+            self.page.update()
+
+        self.page.dialog = dlg
+        dlg.open = True
+        self.page.update()
+
+    def _handle_edit_qty(self, line_item_id: str, current_qty: int):
+        """Open dialog to edit a line item's quantity."""
+        qty_field = ft.TextField(
+            label="New Quantity",
+            value=str(current_qty),
+            keyboard_type=ft.KeyboardType.NUMBER,
+            width=150,
+        )
+
+        def confirm_edit(ev):
+            dlg.open = False
+            self.page.update()
+            try:
+                new_qty = int(qty_field.value.strip())
+                if new_qty <= 0:
+                    show_error_dialog(self.page, "Error", "Quantity must be positive")
+                    return
+            except ValueError:
+                show_error_dialog(self.page, "Error", "Enter a valid number")
+                return
+
+            try:
+                with httpx.Client(timeout=5.0) as client:
+                    response = client.patch(
+                        f"{self.api_base}/api/sales/orders/{self.current_order['id']}/items/{line_item_id}",
+                        json={"quantity": new_qty, "user_id": self.user_info.get("user_id")},
+                    )
+                    if response.status_code == 200:
+                        self.current_order = response.json()
+                        self._update_order_display()
+                        self.page.update()
+                    else:
+                        detail = response.json().get("detail", "Failed to update quantity")
+                        show_error_dialog(self.page, "Error", detail)
+            except Exception as err:
+                show_error_dialog(self.page, "Error", str(err))
+
+        dlg = ft.AlertDialog(
+            title=ft.Text("Edit Quantity"),
+            content=ft.Column([qty_field], tight=True),
+            actions=[
+                ft.TextButton("Cancel", on_click=lambda e: _close(dlg)),
+                ft.ElevatedButton("Update", on_click=confirm_edit,
+                    bgcolor=HMSColors.PRIMARY, color=HMSColors.TEXT_LIGHT),
+            ],
+        )
+
+        def _close(d):
+            d.open = False
+            self.page.update()
+
+        self.page.dialog = dlg
+        dlg.open = True
+        self.page.update()
 
     def _handle_logout(self, e):
         """Logout and return to auth screen."""
         self.on_logout()
 
+    def _handle_remove_item(self, line_item_id: str):
+        """Remove a line item from the current order."""
+        if not self.current_order:
+            return
+
+        try:
+            with httpx.Client(timeout=5.0) as client:
+                response = client.request(
+                    "DELETE",
+                    f"{self.api_base}/api/sales/orders/{self.current_order['id']}/items/{line_item_id}",
+                    json={"user_id": self.user_info.get("user_id")},
+                )
+                if response.status_code == 200:
+                    self.current_order = response.json()
+                    self._update_order_display()
+                    self.page.update()
+                else:
+                    detail = response.json().get("detail", "Failed to remove item")
+                    show_error_dialog(self.page, "Error", detail)
+        except Exception as ex:
+            show_error_dialog(self.page, "Error", str(ex))
+
     def _update_order_display(self):
-        """Update order summary display."""
+        """Update order summary display with line items and remove buttons."""
         if self.current_order:
+            line_items = self.current_order.get("line_items", [])
+            # Build line item widgets with remove buttons
+            item_widgets = []
+            for li in line_items:
+                li_id = li.get("id", "")
+                li_qty = li.get("quantity", 1)
+                item_widgets.append(
+                    ft.Container(
+                        content=ft.Row(
+                            [
+                                ft.Text(
+                                    f"{li.get('item_name', '?')} x{li_qty}",
+                                    size=13, expand=True,
+                                ),
+                                ft.Text(
+                                    f"₹{li.get('total_amount', 0):.2f}",
+                                    size=13, weight="bold",
+                                ),
+                                ft.IconButton(
+                                    icon=ft.icons.EDIT,
+                                    icon_color=HMSColors.PRIMARY,
+                                    icon_size=18,
+                                    tooltip="Edit quantity",
+                                    on_click=lambda e, lid=li_id, q=li_qty: self._handle_edit_qty(lid, q),
+                                ),
+                                ft.IconButton(
+                                    icon=ft.icons.DELETE_OUTLINE,
+                                    icon_color=HMSColors.ERROR,
+                                    icon_size=18,
+                                    tooltip="Remove item",
+                                    on_click=lambda e, lid=li_id: self._handle_remove_item(lid),
+                                ),
+                            ],
+                            spacing=4,
+                        ),
+                        padding=ft.padding.symmetric(vertical=2),
+                    )
+                )
             self.order_summary.update_summary(
                 table_id=self.current_order.get("table_id", "—"),
-                item_count=len(self.current_order.get("line_items", [])),
+                item_count=len(line_items),
                 subtotal=self.current_order.get("subtotal", 0.0),
                 discount=self.current_order.get("discount_amount", 0.0),
                 tax=self.current_order.get("tax_amount", 0.0),
                 total=self.current_order.get("total_amount", 0.0),
+                line_item_widgets=item_widgets,
             )
         else:
             self.order_summary.update_summary(

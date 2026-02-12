@@ -85,7 +85,7 @@ class Order:
     line_items: List[OrderLineItem] = field(default_factory=list)
     created_at: datetime = field(default_factory=datetime.utcnow)
     updated_at: datetime = field(default_factory=datetime.utcnow)
-    created_by: UUID = field(default_factory=lambda: None)  # type: ignore
+    created_by: Optional[UUID] = None
     updated_by: Optional[UUID] = None
     finalized_at: Optional[datetime] = None
     finalized_by: Optional[UUID] = None
@@ -116,7 +116,7 @@ class Payment:
     reference: str  # Receipt number, card ref, voucher code
     finalized_at: datetime
     finalized_by: UUID
-    created_by: UUID = field(default_factory=lambda: None)  # type: ignore
+    created_by: Optional[UUID] = None
 
 
 @dataclass(frozen=True)
@@ -133,7 +133,7 @@ class StockLedgerEntry:
     reason: str
     reference_id: Optional[UUID] = None  # order_id, PO_id, etc.
     created_at: datetime = field(default_factory=datetime.utcnow)
-    created_by: UUID = field(default_factory=lambda: None)  # type: ignore
+    created_by: Optional[UUID] = None
 
 
 @dataclass(frozen=True)

@@ -109,17 +109,10 @@ class TestOfflineOperation:
     def test_authentication_offline(self, test_db, sample_user):
         """Test authentication works offline (cached credentials)."""
         auth_service = AuthService()
-        pin = "1234"
-        pin_hash = auth_service.hash_pin(pin)
 
-        # Create user locally
-        user_repo = AuthService()  # Placeholder
-        from src.infrastructure import UserRepository
-        repo = UserRepository()
-        repo.create(sample_user, pin_hash)
-
-        # Authenticate offline
-        user, token = auth_service.login(sample_user.username, pin)
+        # sample_user fixture already persists user with PIN "1234"
+        # Authenticate offline using cached local credentials
+        user, token = auth_service.login(sample_user.username, "1234")
         assert user.id == sample_user.id
         assert token is not None
 

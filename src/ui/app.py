@@ -9,6 +9,7 @@ import flet as ft
 from src.ui.screens.auth_screen import AuthScreen
 from src.ui.screens.pos_screen import POSScreen
 from src.ui.screens.products_screen import ProductsScreen
+from src.ui.screens.order_history_screen import OrderHistoryScreen
 from src.ui.screens.reports_screen import ReportsScreen
 from src.ui.screens.receipt_screen import ReceiptScreen
 
@@ -20,14 +21,12 @@ class HMSApp:
         """Initialize HMS app."""
         self.page = page
         self.page.title = "Hotel Management System (HMS) - Phase 1.5"
-        self.page.window_width = 1400
-        self.page.window_height = 900
-        self.page.window_resizable = True
+        self.page.padding = 0
+        self.page.spacing = 0
+        self.page.scroll = None  # Disable page-level scroll to prevent duplication
 
         # Theme
         self.page.theme_mode = ft.ThemeMode.LIGHT
-        self.page.padding = 0
-        self.page.spacing = 0
 
         # Current state
         self.current_user = None
@@ -38,14 +37,13 @@ class HMSApp:
 
     def _show_login_screen(self):
         """Display login screen."""
-        self.page.clean()
-
         auth_screen = AuthScreen(
             self.page,
             on_login_success=self._handle_login_success,
         )
 
-        self.page.add(auth_screen)
+        self.page.controls = [auth_screen]
+        self.page.update()
         self.current_screen = "login"
 
     def _handle_login_success(self, user_data: dict):
@@ -54,13 +52,12 @@ class HMSApp:
         self._show_pos_screen()
 
     def _show_pos_screen(self):
-        """Display main POS screen."""
-        self.page.clean()
-
+        """Display main POS screen with navigation rail."""
         # Create main navigation
         nav_rail = ft.NavigationRail(
             selected_index=0,
             label_type=ft.NavigationRailLabelType.ALL,
+            min_width=60,
             destinations=[
                 ft.NavigationRailDestination(
                     icon=ft.icons.SHOPPING_CART,
@@ -71,6 +68,11 @@ class HMSApp:
                     icon=ft.icons.INVENTORY_2,
                     selected_icon=ft.icons.INVENTORY_2,
                     label="Products",
+                ),
+                ft.NavigationRailDestination(
+                    icon=ft.icons.HISTORY,
+                    selected_icon=ft.icons.HISTORY,
+                    label="Orders",
                 ),
                 ft.NavigationRailDestination(
                     icon=ft.icons.ASSESSMENT,
@@ -95,6 +97,13 @@ class HMSApp:
             on_back=lambda: self._switch_screen(0),
         )
 
+        # Order history screen
+        order_history_screen = OrderHistoryScreen(
+            self.page,
+            self.current_user,
+            on_back=lambda: self._switch_screen(0),
+        )
+
         # Reports screen
         reports_screen = ReportsScreen(
             self.page,
@@ -103,17 +112,17 @@ class HMSApp:
         )
 
         # Store references
-        self.screens = [pos_screen, products_screen, reports_screen]
+        self.screens = [pos_screen, products_screen, order_history_screen, reports_screen]
         self.nav_rail = nav_rail
         self.current_nav_index = 0
 
-        # Main content area
+        # Main content area — wrap screen in a scrollable column inside container
         self.content_area = ft.Container(
             content=self.screens[0],
             expand=True,
         )
 
-        # Main layout
+        # Main layout — single Row fills the entire page
         main_layout = ft.Row(
             [
                 nav_rail,
@@ -122,9 +131,11 @@ class HMSApp:
             ],
             spacing=0,
             expand=True,
+            vertical_alignment=ft.CrossAxisAlignment.START,
         )
 
-        self.page.add(main_layout)
+        self.page.controls = [main_layout]
+        self.page.update()
         self.current_screen = "pos"
 
     def _handle_nav_change(self, e):
@@ -139,8 +150,11 @@ class HMSApp:
         self.nav_rail.update()
 
     def _handle_logout(self):
-        """Handle logout."""
+        """Handle logout — clear state and return to login."""
         self.current_user = None
+        self.screens = None
+        self.nav_rail = None
+        self.content_area = None
         self._show_login_screen()
 
 

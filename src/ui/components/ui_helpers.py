@@ -167,12 +167,13 @@ class OrderSummaryWidget(ft.Card):
     """
     Order summary display (always visible).
 
-    Shows: table, items, subtotal, tax, discount, total.
+    Shows: table, line items with remove buttons, subtotal, tax, discount, total.
     """
 
     def __init__(self):
         self.table_id_text = ft.Text("Table: —", size=16, weight="bold")
         self.item_count_text = ft.Text("Items: 0", size=16)
+        self.line_items_list = ft.ListView(spacing=2, height=200)
         self.subtotal_text = ft.Text("Subtotal: ₹0.00", size=16)
         self.discount_text = ft.Text("Discount: ₹0.00", size=16, color=HMSColors.WARNING)
         self.tax_text = ft.Text("Tax (18%): ₹0.00", size=16)
@@ -189,6 +190,9 @@ class OrderSummaryWidget(ft.Card):
                     [
                         self.table_id_text,
                         self.item_count_text,
+                        ft.Divider(),
+                        ft.Text("Order Items:", size=13, weight="bold", color=HMSColors.TEXT_SECONDARY),
+                        self.line_items_list,
                         ft.Divider(),
                         self.subtotal_text,
                         self.discount_text,
@@ -212,14 +216,26 @@ class OrderSummaryWidget(ft.Card):
         discount: float,
         tax: float,
         total: float,
+        line_item_widgets: list = None,
     ):
-        """Update summary with order data."""
+        """Update summary with order data and optional line item widgets with remove buttons."""
         self.table_id_text.value = f"Table: {table_id}"
         self.item_count_text.value = f"Items: {item_count}"
         self.subtotal_text.value = f"Subtotal: ₹{subtotal:.2f}"
         self.discount_text.value = f"Discount: ₹{discount:.2f}"
         self.tax_text.value = f"Tax (18%): ₹{tax:.2f}"
         self.total_text.value = f"Total: ₹{total:.2f}"
+
+        # Update line items list
+        self.line_items_list.controls.clear()
+        if line_item_widgets:
+            for w in line_item_widgets:
+                self.line_items_list.controls.append(w)
+        elif item_count == 0:
+            self.line_items_list.controls.append(
+                ft.Text("No items yet", size=12, color=HMSColors.TEXT_SECONDARY)
+            )
+
         self.update()
 
 
@@ -253,7 +269,7 @@ class ItemPickerWidget(ft.Column):
 
         self.item_list = ft.ListView(
             spacing=10,
-            height=400,
+            expand=True,
         )
 
         super().__init__(
@@ -267,7 +283,7 @@ class ItemPickerWidget(ft.Column):
                 self.item_list,
             ],
             spacing=10,
-            height=500,
+            expand=True,
         )
 
     def set_items(self, items: list):

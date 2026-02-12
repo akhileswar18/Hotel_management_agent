@@ -78,6 +78,15 @@ build/
 Thumbs.db
 *.lnk
 
+# PyInstaller
+*.spec.bak
+*.manifest
+HMS.exe
+
+# Docker
+docker-compose.override.yml
+
 # Project-specific
 hms_dev.db
 test_*.db
+tmpclaude-*

@@ -7,6 +7,8 @@ from src.infrastructure.repositories import (
     UserRepository,
     StockLedgerRepository,
     AuditLogRepository,
+    PaymentRepository,
+    VoidRecordRepository,
 )
 
 __all__ = [
@@ -18,4 +20,6 @@ __all__ = [
     "UserRepository",
     "StockLedgerRepository",
     "AuditLogRepository",
+    "PaymentRepository",
+    "VoidRecordRepository",
 ]

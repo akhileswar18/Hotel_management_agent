@@ -161,6 +161,113 @@ class OrderRepository(BaseRepository):
             receipt_number=row["receipt_number"],
         )
 
+    def create_line_item(self, line_item: OrderLineItem) -> OrderLineItem:
+        """Insert a line item into the database."""
+        query = """
+            INSERT INTO order_line_items (
+                id, order_id, item_id, item_name, quantity,
+                unit_price_cents, discount_cents, tax_cents,
+                total_cents, created_at, created_by
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """
+        params = (
+            str(line_item.id),
+            str(line_item.order_id),
+            str(line_item.item_id),
+            line_item.item_name,
+            line_item.quantity,
+            line_item.unit_price.cents,
+            line_item.discount_amount.cents,
+            line_item.tax_amount.cents,
+            line_item.total_amount.cents,
+            line_item.created_at.isoformat() + "Z",
+            str(line_item.created_by),
+        )
+        self.conn.execute(query, params)
+        self.conn.commit()
+        return line_item
+
+    def update_order_totals(
+        self,
+        order_id: str,
+        subtotal_cents: int,
+        discount_cents: int,
+        tax_cents: int,
+        total_cents: int,
+        updated_by: UUID,
+    ) -> None:
+        """Update order monetary totals after adding/removing items."""
+        query = """
+            UPDATE orders
+            SET subtotal_cents = ?, discount_cents = ?, tax_cents = ?,
+                total_cents = ?, updated_at = ?, updated_by = ?
+            WHERE id = ?
+        """
+        params = (
+            subtotal_cents,
+            discount_cents,
+            tax_cents,
+            total_cents,
+            datetime.utcnow().isoformat() + "Z",
+            str(updated_by),
+            order_id,
+        )
+        self.conn.execute(query, params)
+        self.conn.commit()
+
+    def void_order(self, order_id: str, voided_by: UUID) -> None:
+        """Mark order as voided."""
+        query = """
+            UPDATE orders
+            SET status = 'voided', updated_at = ?, updated_by = ?
+            WHERE id = ?
+        """
+        params = (
+            datetime.utcnow().isoformat() + "Z",
+            str(voided_by),
+            order_id,
+        )
+        self.conn.execute(query, params)
+        self.conn.commit()
+
+    def remove_line_item(self, line_item_id: str, order_id: str) -> None:
+        """Remove a line item from a draft order."""
+        query = "DELETE FROM order_line_items WHERE id = ? AND order_id = ?"
+        self.conn.execute(query, (line_item_id, order_id))
+        self.conn.commit()
+
+    def update_line_item_quantity(self, line_item_id: str, new_quantity: int, new_total_cents: int) -> None:
+        """Update a line item's quantity and total."""
+        query = "UPDATE order_line_items SET quantity = ?, total_cents = ? WHERE id = ?"
+        self.conn.execute(query, (new_quantity, new_total_cents, line_item_id))
+        self.conn.commit()
+
+    def set_order_status(self, order_id: str, status: str, updated_by: UUID) -> None:
+        """Set order status to any value."""
+        query = """
+            UPDATE orders
+            SET status = ?, updated_at = ?, updated_by = ?
+            WHERE id = ?
+        """
+        params = (status, datetime.utcnow().isoformat() + "Z", str(updated_by), order_id)
+        self.conn.execute(query, params)
+        self.conn.commit()
+
+    def list_filtered(self, status: str = None, date_str: str = None) -> list:
+        """List orders with optional status and date filters."""
+        query = "SELECT * FROM orders WHERE 1=1"
+        params = []
+        if status:
+            query += " AND status = ?"
+            params.append(status)
+        if date_str:
+            query += " AND DATE(created_at) = DATE(?)"
+            params.append(date_str)
+        query += " ORDER BY created_at DESC"
+        cursor = self.conn.execute(query, params)
+        return [self._row_to_order(row) for row in cursor.fetchall()]
+
     @staticmethod
     def _lineitem_row_to_entity(row: sqlite3.Row) -> OrderLineItem:
         """Convert line item row to entity."""
@@ -222,6 +329,49 @@ class ItemRepository(BaseRepository):
     def list_by_category(self, category: str) -> List[Item]:
         """List items by category."""
         query = "SELECT * FROM items WHERE category = ? ORDER BY name"
+        cursor = self.conn.execute(query, (category,))
+        return [self._row_to_item(row) for row in cursor.fetchall()]
+
+    def update_item(self, item_id: str, unit_price_cents: Optional[int] = None,
+                    reorder_level: Optional[int] = None, updated_by: Optional[str] = None) -> None:
+        """Update item price and/or reorder level."""
+        updates = []
+        params = []
+        if unit_price_cents is not None:
+            updates.append("unit_price_cents = ?")
+            params.append(unit_price_cents)
+        if reorder_level is not None:
+            updates.append("reorder_level = ?")
+            params.append(reorder_level)
+        if not updates:
+            return
+        updates.append("updated_at = ?")
+        params.append(datetime.utcnow().isoformat() + "Z")
+        if updated_by:
+            updates.append("updated_by = ?")
+            params.append(updated_by)
+        params.append(item_id)
+        query = f"UPDATE items SET {', '.join(updates)} WHERE id = ?"
+        self.conn.execute(query, params)
+        self.conn.commit()
+
+    def archive_item(self, item_id: str, updated_by: str = None) -> None:
+        """Soft-delete an item by setting is_active = 0."""
+        from datetime import datetime
+        query = "UPDATE items SET is_active = 0, updated_at = ?, updated_by = ? WHERE id = ?"
+        params = (datetime.utcnow().isoformat() + "Z", updated_by, item_id)
+        self.conn.execute(query, params)
+        self.conn.commit()
+
+    def list_active(self) -> list:
+        """List only active (non-archived) items."""
+        query = "SELECT * FROM items WHERE is_active = 1 ORDER BY category, name"
+        cursor = self.conn.execute(query)
+        return [self._row_to_item(row) for row in cursor.fetchall()]
+
+    def list_by_category_active(self, category: str) -> list:
+        """List active items by category."""
+        query = "SELECT * FROM items WHERE category = ? AND is_active = 1 ORDER BY name"
         cursor = self.conn.execute(query, (category,))
         return [self._row_to_item(row) for row in cursor.fetchall()]
 
@@ -444,6 +594,181 @@ class AuditLogRepository(BaseRepository):
         )
 
 
-# TODO: Add PaymentRepository
-# TODO: Add VoidRecordRepository
-# TODO: Add TransactionRepository for complex queries
+class PaymentRepository(BaseRepository):
+    """Repository for Payment entities."""
+
+    def create(self, payment: Payment) -> Payment:
+        """Record a payment."""
+        query = """
+            INSERT INTO payments (
+                id, order_id, amount_cents, method, reference,
+                finalized_at, finalized_by, created_at, created_by
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """
+        params = (
+            str(payment.id),
+            str(payment.order_id),
+            payment.amount.cents,
+            payment.method.value,
+            payment.reference,
+            payment.finalized_at.isoformat() + "Z",
+            str(payment.finalized_by),
+            payment.finalized_at.isoformat() + "Z",
+            str(payment.created_by),
+        )
+        self.conn.execute(query, params)
+        self.conn.commit()
+        return payment
+
+    def get(self, payment_id: str) -> Optional[Payment]:
+        """Get payment by ID."""
+        query = "SELECT * FROM payments WHERE id = ?"
+        cursor = self.conn.execute(query, (payment_id,))
+        row = cursor.fetchone()
+        return self._row_to_payment(row) if row else None
+
+    def get_by_order(self, order_id: str) -> Optional[Payment]:
+        """Get payment for a specific order."""
+        query = "SELECT * FROM payments WHERE order_id = ?"
+        cursor = self.conn.execute(query, (order_id,))
+        row = cursor.fetchone()
+        return self._row_to_payment(row) if row else None
+
+    def list(self) -> List[Payment]:
+        """List all payments."""
+        query = "SELECT * FROM payments ORDER BY finalized_at DESC"
+        cursor = self.conn.execute(query)
+        return [self._row_to_payment(row) for row in cursor.fetchall()]
+
+    def get_payments_by_date(self, date: datetime) -> List[Payment]:
+        """Get all payments for a specific date."""
+        query = """
+            SELECT * FROM payments
+            WHERE DATE(finalized_at) = DATE(?)
+            ORDER BY finalized_at DESC
+        """
+        cursor = self.conn.execute(query, (date.isoformat(),))
+        return [self._row_to_payment(row) for row in cursor.fetchall()]
+
+    def get_daily_summary(self, date: datetime) -> Dict[str, Any]:
+        """Get daily payment summary with totals by method."""
+        query = """
+            SELECT
+                method,
+                COUNT(*) as count,
+                SUM(amount_cents) as total_cents
+            FROM payments
+            WHERE DATE(finalized_at) = DATE(?)
+            GROUP BY method
+        """
+        cursor = self.conn.execute(query, (date.isoformat(),))
+        rows = cursor.fetchall()
+
+        summary: Dict[str, Any] = {
+            "total_revenue_cents": 0,
+            "transaction_count": 0,
+            "by_method": {},
+        }
+        for row in rows:
+            method = row["method"]
+            count = row["count"]
+            total = row["total_cents"]
+            summary["by_method"][method] = {"count": count, "total_cents": total}
+            summary["total_revenue_cents"] += total
+            summary["transaction_count"] += count
+
+        return summary
+
+    @staticmethod
+    def _row_to_payment(row: sqlite3.Row) -> Payment:
+        """Convert database row to Payment entity."""
+        return Payment(
+            id=UUID(row["id"]),
+            order_id=UUID(row["order_id"]),
+            amount=Money(cents=row["amount_cents"]),
+            method=PaymentMethod(row["method"]),
+            reference=row["reference"] or "",
+            finalized_at=datetime.fromisoformat(row["finalized_at"].replace("Z", "+00:00")),
+            finalized_by=UUID(row["finalized_by"]),
+            created_by=UUID(row["created_by"]),
+        )
+
+
+class VoidRecordRepository(BaseRepository):
+    """Repository for VoidRecord entities."""
+
+    def create(self, record: Any) -> Any:
+        """Create a void record."""
+        from src.domain import VoidRecord
+        void_record: VoidRecord = record
+        query = """
+            INSERT INTO void_records (
+                id, original_order_id, void_reason, voided_at,
+                voided_by, approved_by, created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """
+        params = (
+            str(void_record.id),
+            str(void_record.original_order_id),
+            void_record.void_reason,
+            void_record.voided_at.isoformat() + "Z",
+            str(void_record.voided_by),
+            str(void_record.approved_by) if void_record.approved_by else None,
+            void_record.voided_at.isoformat() + "Z",
+        )
+        self.conn.execute(query, params)
+        self.conn.commit()
+        return void_record
+
+    def get(self, record_id: str) -> Optional[Any]:
+        """Get void record by ID."""
+        from src.domain import VoidRecord
+        query = "SELECT * FROM void_records WHERE id = ?"
+        cursor = self.conn.execute(query, (record_id,))
+        row = cursor.fetchone()
+        if not row:
+            return None
+        return VoidRecord(
+            id=UUID(row["id"]),
+            original_order_id=UUID(row["original_order_id"]),
+            void_reason=row["void_reason"],
+            voided_at=datetime.fromisoformat(row["voided_at"].replace("Z", "+00:00")),
+            voided_by=UUID(row["voided_by"]),
+            approved_by=UUID(row["approved_by"]) if row["approved_by"] else None,
+        )
+
+    def get_by_order(self, order_id: str) -> Optional[Any]:
+        """Get void record for a specific order."""
+        query = "SELECT * FROM void_records WHERE original_order_id = ?"
+        cursor = self.conn.execute(query, (order_id,))
+        row = cursor.fetchone()
+        if not row:
+            return None
+        from src.domain import VoidRecord
+        return VoidRecord(
+            id=UUID(row["id"]),
+            original_order_id=UUID(row["original_order_id"]),
+            void_reason=row["void_reason"],
+            voided_at=datetime.fromisoformat(row["voided_at"].replace("Z", "+00:00")),
+            voided_by=UUID(row["voided_by"]),
+            approved_by=UUID(row["approved_by"]) if row["approved_by"] else None,
+        )
+
+    def list(self) -> List[Any]:
+        """List all void records."""
+        from src.domain import VoidRecord
+        query = "SELECT * FROM void_records ORDER BY voided_at DESC"
+        cursor = self.conn.execute(query)
+        results = []
+        for row in cursor.fetchall():
+            results.append(VoidRecord(
+                id=UUID(row["id"]),
+                original_order_id=UUID(row["original_order_id"]),
+                void_reason=row["void_reason"],
+                voided_at=datetime.fromisoformat(row["voided_at"].replace("Z", "+00:00")),
+                voided_by=UUID(row["voided_by"]),
+                approved_by=UUID(row["approved_by"]) if row["approved_by"] else None,
+            ))
+        return results

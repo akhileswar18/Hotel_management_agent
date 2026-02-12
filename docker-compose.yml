@@ -1,0 +1,80 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# Hotel Management System — Docker Compose
+#
+# Services:
+#   hms-api  — FastAPI backend (port 8000)
+#   hms-ui   — Flet web UI (port 8080)
+#
+# Usage:
+#   docker compose up              # Start both services
+#   docker compose up -d           # Start in background
+#   docker compose down            # Stop all services
+#   docker compose logs -f hms-api # Follow API logs
+#
+# Data is persisted in a named volume (survives container restarts).
+# ──────────────────────────────────────────────────────────────────────────────
+
+version: "3.9"
+
+services:
+  # ── FastAPI Backend ──────────────────────────────────────────────────────
+  hms-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    container_name: hms-api
+    command: >
+      python -m uvicorn src.api.app:app
+      --host 0.0.0.0
+      --port 8000
+      --log-level info
+    ports:
+      - "${API_PORT:-8000}:8000"
+    volumes:
+      - hms-data:/app/data
+      - hms-logs:/app/logs
+    environment:
+      - DATABASE_URL=sqlite:///./data/hms.db
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - LOG_DIR=/app/logs
+      - API_HOST=0.0.0.0
+      - API_PORT=8000
+      - PRINTER_ENABLED=false
+      - OFFLINE_MODE=true
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
+  # ── Flet Web UI ─────────────────────────────────────────────────────────
+  hms-ui:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    container_name: hms-ui
+    command: python -m src.ui.app
+    ports:
+      - "${UI_PORT:-8080}:8080"
+    volumes:
+      - hms-data:/app/data
+      - hms-logs:/app/logs
+    environment:
+      - DATABASE_URL=sqlite:///./data/hms.db
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - API_HOST=hms-api
+      - API_PORT=8000
+    depends_on:
+      hms-api:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  hms-data:
+    driver: local
+  hms-logs:
+    driver: local
