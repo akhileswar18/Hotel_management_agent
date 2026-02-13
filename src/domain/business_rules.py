@@ -282,5 +282,5 @@ def validate_permission(user_role: str, action: str) -> bool:
 
 
 # TODO: Implement complex discount rules (buy 3 get 1 free, etc.)
-# TODO: Add loyalty points calculation (Phase 3)
+# TODO: Add loyalty points calculation (future)
 # TODO: Add tiered pricing rules

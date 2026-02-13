@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Auth Events Contract",
+  "description": "Event payload schemas for AuthAgent",
+  "events": {
+    "auth.login": {
+      "payload": {
+        "type": "object",
+        "required": ["username", "pin"],
+        "properties": {
+          "username": { "type": "string", "maxLength": 50 },
+          "pin": { "type": "string", "minLength": 4, "maxLength": 10 }
+        }
+      },
+      "published_by": "API",
+      "consumed_by": ["AuthAgent"]
+    },
+    "auth.logged_in": {
+      "payload": {
+        "type": "object",
+        "required": ["user_id", "username", "role", "session_token"],
+        "properties": {
+          "user_id": { "type": "string", "format": "uuid" },
+          "username": { "type": "string" },
+          "role": { "type": "string", "enum": ["WAITER", "CASHIER", "MANAGER", "CLERK", "ADMIN"] },
+          "session_token": { "type": "string" }
+        }
+      },
+      "published_by": "AuthAgent",
+      "consumed_by": ["AuditAgent"]
+    },
+    "auth.logout": {
+      "payload": {
+        "type": "object",
+        "properties": {
+          "session_token": { "type": "string" },
+          "user_id": { "type": "string" }
+        }
+      },
+      "published_by": "API",
+      "consumed_by": ["AuthAgent"]
+    },
+    "auth.session_expired": {
+      "payload": {
+        "type": "object",
+        "required": ["user_id"],
+        "properties": {
+          "user_id": { "type": "string", "format": "uuid" },
+          "expired_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "published_by": "AuthAgent",
+      "consumed_by": ["NotificationAgent"]
+    }
+  }
+}

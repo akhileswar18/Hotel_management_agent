@@ -123,6 +123,96 @@ class Database:
             self._connection.close()
             self._connection = None
 
+    def backup(self, backup_path: str = None) -> str:
+        """
+        Create a backup of the database.
+
+        Args:
+            backup_path: Optional path for backup file. If None, auto-generates.
+
+        Returns:
+            Path to the backup file.
+        """
+        from pathlib import Path
+
+        if self._connection is None:
+            raise RuntimeError("Database not initialized")
+
+        # Get current db path
+        config = DatabaseConfig()
+        source_path = config.db_path
+
+        if backup_path is None:
+            backup_dir = Path("backups")
+            backup_dir.mkdir(exist_ok=True)
+            timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+            backup_path = str(backup_dir / f"hms_backup_{timestamp}.db")
+
+        # Checkpoint WAL to ensure consistency
+        self._connection.execute("PRAGMA wal_checkpoint(FULL)")
+
+        # Use SQLite backup API
+        backup_conn = sqlite3.connect(backup_path)
+        self._connection.backup(backup_conn)
+        backup_conn.close()
+
+        return backup_path
+
+    def restore(self, backup_path: str) -> None:
+        """
+        Restore database from a backup file.
+
+        Args:
+            backup_path: Path to the backup file.
+        """
+        import shutil
+        from pathlib import Path
+
+        if not Path(backup_path).exists():
+            raise FileNotFoundError(f"Backup file not found: {backup_path}")
+
+        config = DatabaseConfig()
+        target_path = config.db_path
+
+        # Close current connection
+        if self._connection:
+            self._connection.close()
+            self._connection = None
+
+        # Copy backup over current DB
+        shutil.copy2(backup_path, target_path)
+
+        # Remove WAL and SHM files if they exist
+        for ext in ["-wal", "-shm"]:
+            wal_path = Path(target_path + ext)
+            if wal_path.exists():
+                wal_path.unlink()
+
+        # Reset singleton and reinitialize
+        Database._instance = None
+        Database._connection = None
+
+    def vacuum(self) -> None:
+        """Run VACUUM to reclaim space and optimize the database."""
+        if self._connection is None:
+            raise RuntimeError("Database not initialized")
+        self._connection.execute("VACUUM")
+
+    def get_db_size(self) -> dict:
+        """Get database file size info."""
+        from pathlib import Path
+        config = DatabaseConfig()
+        db_path = Path(config.db_path)
+        size_bytes = db_path.stat().st_size if db_path.exists() else 0
+        wal_path = Path(config.db_path + "-wal")
+        wal_size = wal_path.stat().st_size if wal_path.exists() else 0
+        return {
+            "db_size_bytes": size_bytes,
+            "db_size_mb": round(size_bytes / (1024 * 1024), 2),
+            "wal_size_bytes": wal_size,
+            "total_mb": round((size_bytes + wal_size) / (1024 * 1024), 2),
+        }
+
     @staticmethod
     def get_utc_now_str() -> str:
         """Get current UTC timestamp as ISO 8601 string."""
@@ -148,5 +238,3 @@ def get_db() -> sqlite3.Connection:
 
 
 # TODO: Implement connection pooling for multi-threaded scenarios
-# TODO: Add database health check endpoint
-# TODO: Add database backup/restore functionality

@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Insight Events Contract",
+  "description": "Event payload schemas for InsightAgent (LLM-powered, READ-ONLY)",
+  "events": {
+    "insight.suggest_upsell": {
+      "payload": {
+        "type": "object",
+        "required": ["order_id", "current_items"],
+        "properties": {
+          "order_id": { "type": "string", "format": "uuid" },
+          "current_items": { "type": "array", "items": { "type": "string" } }
+        }
+      },
+      "published_by": "OrchestratorAgent",
+      "consumed_by": ["InsightAgent"]
+    },
+    "insight.suggestion": {
+      "payload": {
+        "type": "object",
+        "required": ["order_id", "suggestions"],
+        "properties": {
+          "order_id": { "type": "string", "format": "uuid" },
+          "suggestions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "item": { "type": "string" },
+                "reason": { "type": "string" },
+                "confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+              }
+            }
+          },
+          "model": { "type": "string" },
+          "inference_ms": { "type": "number" }
+        }
+      },
+      "published_by": "InsightAgent",
+      "consumed_by": ["UI"]
+    },
+    "insight.analyze_trends": {
+      "payload": {
+        "type": "object",
+        "required": ["date_range"],
+        "properties": {
+          "date_range": { "type": "string" },
+          "focus": { "type": "string" }
+        }
+      },
+      "published_by": "UI",
+      "consumed_by": ["InsightAgent"]
+    },
+    "insight.analysis": {
+      "payload": {
+        "type": "object",
+        "required": ["summary"],
+        "properties": {
+          "summary": { "type": "string" },
+          "trends": { "type": "array" },
+          "anomalies": { "type": "array" }
+        }
+      },
+      "published_by": "InsightAgent",
+      "consumed_by": ["UI"]
+    },
+    "insight.natural_query": {
+      "payload": {
+        "type": "object",
+        "required": ["query"],
+        "properties": {
+          "query": { "type": "string" },
+          "context": { "type": "object" }
+        }
+      },
+      "published_by": "UI",
+      "consumed_by": ["InsightAgent"]
+    }
+  },
+  "_constraints": {
+    "db_access": "READ-ONLY",
+    "timeout_ms": 5000,
+    "degradable": true,
+    "note": "System MUST function normally if InsightAgent is unavailable"
+  }
+}

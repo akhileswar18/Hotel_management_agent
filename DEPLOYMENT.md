@@ -20,6 +20,7 @@ Complete guide to deploying the Hotel Management System. Three methods available
 
 | Method | Best For | Command |
 |---|---|---|
+| **Launcher** | Recommended | `python -m src.launcher` |
 | **Python** | Developers, testing | `python -m src` + `python -m src.ui.app` |
 | **Windows .exe** | End users, deployment | `.\dist\HMS.exe` |
 | **Docker** | Servers, cloud | `docker compose up` |
@@ -251,6 +252,17 @@ UI_PORT=8080
 
 ## Configuration
 
+### Voice Dependencies (Optional)
+
+The system works fully without voice. To enable voice input and spoken responses:
+- **STT**: Install `openai-whisper` (or use system Whisper) for speech-to-text.
+- **TTS**: Install `pyttsx3` for text-to-speech on the host.
+- If these are not installed, the Chat screen and WebSocket still work with text-only input and output.
+
+### LLM Configuration (Optional)
+
+InsightAgent (upsell, trends, natural-language queries) and OrchestratorAgent (intent parsing) can use an LLM. The system is fully functional without an LLM; those features degrade gracefully when the LLM is unavailable or not configured.
+
 ### Environment Variables
 
 | Variable | Default | Description |
@@ -264,6 +276,24 @@ UI_PORT=8080
 | `OFFLINE_MODE` | `true` | Offline-first mode (always true for v1.0) |
 | `TAX_RATE` | `0.18` | Tax rate (18% default) |
 | `CURRENCY` | `INR` | Currency code |
+
+**Voice (optional):** The system runs fully without voice. If you enable voice/chat:
+- **STT**: `whisper` (pip install openai-whisper) — local speech-to-text
+- **TTS**: `pyttsx3` (pip install pyttsx3) — local text-to-speech
+- No env vars required for basic voice; WebSocket `/ws/voice` and Chat screen work with text-only if STT/TTS are missing.
+
+**LLM (optional):** InsightAgent and OrchestratorAgent can use an LLM for insights and intent parsing. The system works fully without an LLM (degradable behavior). If you configure an LLM:
+
+| Variable | Default | Description |
+|---|---|---|
+| `LLM_PROVIDER` | `ollama` | `ollama` (local) or `openai` (cloud) |
+| `LLM_MODEL` | `llama3.2` | Model name (e.g. `llama3.2`, `gpt-4o-mini`) |
+| `LLM_API_KEY` | — | Required for `openai`; not needed for `ollama` |
+| `LLM_BASE_URL` | `http://localhost:11434` | Ollama base URL; for OpenAI use provider default |
+| `LLM_TIMEOUT` | `30` | Timeout in seconds for LLM calls |
+
+- **Ollama (local)**: Install [Ollama](https://ollama.ai), run `ollama pull llama3.2`. Set `LLM_PROVIDER=ollama`, `LLM_MODEL=llama3.2`. No API key.
+- **OpenAI (cloud)**: Set `LLM_PROVIDER=openai`, `LLM_MODEL=gpt-4o-mini`, `LLM_API_KEY=sk-...`. Requires internet.
 
 ### Setting Environment Variables
 
@@ -302,6 +332,22 @@ cp hms.db hms_backup_$(date +%Y%m%d).db
 
 # Docker
 docker cp hms-api:/app/data/hms.db ./hms_backup.db
+```
+
+### Backup & Restore
+
+```bash
+# Create backup
+python scripts/backup.py backup
+
+# List backups
+python scripts/backup.py list
+
+# Restore from backup
+python scripts/backup.py restore --path backups/hms_backup_20260213_120000.db
+
+# Vacuum database (reclaim space)
+python scripts/backup.py vacuum
 ```
 
 ### Reset Database

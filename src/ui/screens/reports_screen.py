@@ -10,7 +10,8 @@ import flet as ft
 import httpx
 from datetime import datetime, date, timedelta
 from src.ui.components.ui_helpers import (
-    HMSButton, HMSColors, show_error_dialog, show_success_dialog, create_header
+    HMSButton, HMSColors, show_error_dialog, show_success_dialog, create_header,
+    RefreshButton,
 )
 
 
@@ -18,7 +19,7 @@ class ReportsScreen(ft.Column):
     """Reports and analytics screen."""
 
     def __init__(self, page: ft.Page, user_info: dict, on_back):
-        self.page = page
+        self._page = page
         self.user_info = user_info
         self.on_back = on_back
         self.api_base = "http://127.0.0.1:8000"
@@ -171,11 +172,11 @@ class ReportsScreen(ft.Column):
             margin=10,
         )
 
-        # Buttons
-        refresh_button = HMSButton(
-            "Refresh",
-            self._handle_refresh,
-            color=HMSColors.PRIMARY,
+        # Standardized Refresh button (replaces ad-hoc HMSButton)
+        self.refresh_button = RefreshButton(
+            on_refresh=self._load_reports,
+            page=self._page,
+            tooltip="Refresh reports",
         )
 
         export_sales_button = HMSButton(
@@ -203,7 +204,7 @@ class ReportsScreen(ft.Column):
                     [
                         ft.Text("Reports", size=20, weight="bold"),
                         ft.Container(expand=True),
-                        refresh_button,
+                        self.refresh_button,
                         export_sales_button,
                         export_inv_button,
                         back_button,
@@ -232,7 +233,7 @@ class ReportsScreen(ft.Column):
         self.date_input.value = new_date.isoformat()
         self._load_reports()
         try:
-            self.page.update()
+            self._page.update()
         except Exception:
             pass
 
@@ -448,14 +449,6 @@ class ReportsScreen(ft.Column):
         try:
             self.txn_results_list.update()
             self.txn_count_text.update()
-        except Exception:
-            pass
-
-    def _handle_refresh(self, e):
-        """Refresh reports."""
-        self._load_reports()
-        try:
-            self.page.update()
         except Exception:
             pass
 

@@ -1,5 +1,7 @@
 # Phase 1 (MVP) Task Breakdown & Roadmap
 
+> **STATUS**: Phase 1 COMPLETE. All subsequent phases (2-10) also complete — see specs/main/tasks.md for full task tracking.
+
 **Version**: 2.0 | **Date**: February 11, 2026 | **Status**: Phase 1 COMPLETE
 
 ---

@@ -1,11 +1,11 @@
 ---
 name: flet-fastapi-windows-debugging
-description: Diagnose and fix common errors in Flet + FastAPI apps running on Windows. Covers Unicode encoding crashes, asyncio event loop conflicts, Flet API version mismatches, and Column/Container parameter issues. Use when the app fails to start, the Flet UI shows errors, or when debugging runtime issues in this HMS project.
+description: Diagnose and fix common errors in Flet + FastAPI apps running on Windows. Covers Unicode encoding crashes, asyncio event loop conflicts, Flet API version mismatches, Column/Container parameter issues, NavigationRail height errors, self.page property conflicts in ft.Column subclasses, and agent/EventBus debugging. Use when the app fails to start, the Flet UI shows errors, or when debugging runtime issues in this HMS project.
 ---
 
 # Flet + FastAPI Debugging on Windows
 
-Known issues and fixes for running this HMS project (Flet 0.21.x + FastAPI) on Windows.
+Known issues and fixes for running this HMS project (Flet 0.80.x + FastAPI) on Windows.
 
 ## Debugging Checklist
 
@@ -16,7 +16,14 @@ When the app fails to start or the UI shows errors:
 - [ ] Check for asyncio.run() calls inside Flet event handlers or constructors
 - [ ] Check for unsupported kwargs on Flet controls (e.g. padding on Column)
 - [ ] Check NavigationRail uses NavigationRailDestination (not NavigationDestination)
+- [ ] Check NavigationRail has bounded height (not wrapped in unbounded Column)
+- [ ] Check ft.Column subclasses use self._page, NOT self.page (Flet property conflict)
+- [ ] Check icon references use ft.icons.X (lowercase), NOT ft.Icons.X (capitalized)
+- [ ] Check nested dialog callbacks for variable shadowing (use nonlocal + distinct names)
+- [ ] Check IntentParser priority order — compound phrases before broad keywords (Error 11)
 - [ ] Check ports 8000/8080 are not already occupied by stale processes
+- [ ] (Agents) Check event_log table for recent events if event-driven behavior is missing
+- [ ] (Agents) Verify agents are registered and subscribed in API startup (AgentRegistry)
 ```
 
 ---
@@ -173,9 +180,267 @@ Start the API first, then the UI. The Flet process produces no console output --
 
 ---
 
+## Error 6: `'NoneType' object has no attribute 'on_keyboard_event'` (or any page attribute)
+
+**Symptom**: Login or navigation crashes with:
+```
+'NoneType' object has no attribute 'on_keyboard_event'
+```
+or similar `'NoneType' object has no attribute 'dialog'`, `'NoneType' object has no attribute 'update'`, etc.
+
+**Cause**: `ft.Column` (and all Flet controls) has a built-in **read-only `page` property** that returns `None` until the control is mounted on the page. When a screen class does `self.page = page` in `__init__`, Flet's internal property overrides the assignment, so `self.page` returns `None`.
+
+**Fix**: Store the page reference as `self._page` (private attribute) to avoid the naming conflict:
+
+```python
+# BAD — Flet's internal .page property overrides this
+class POSScreen(ft.Column):
+    def __init__(self, page: ft.Page, ...):
+        self.page = page          # IGNORED by Flet's property!
+        ...
+        self.page.dialog = dlg    # NoneType error!
+
+# GOOD — use private name to avoid conflict
+class POSScreen(ft.Column):
+    def __init__(self, page: ft.Page, ...):
+        self._page = page         # Safe — no conflict
+        ...
+        self._page.dialog = dlg   # Works!
+```
+
+**Applies to ALL screen classes** that extend `ft.Column`, `ft.Row`, `ft.Container`, or any Flet control:
+- `pos_screen.py` → `self._page`
+- `products_screen.py` → `self._page`
+- `reports_screen.py` → `self._page`
+- `order_history_screen.py` → `self._page`
+- `user_mgmt_screen.py` → `self._page`
+- `receipt_screen.py` → `self._page`
+- `auth_screen.py` → already uses `self._page` (reference pattern)
+
+---
+
+## Error 7: `module 'flet' has no attribute 'Icons'` (capitalization)
+
+**Symptom**: App crashes with:
+```
+AttributeError: module 'flet' has no attribute 'Icons'
+```
+
+**Cause**: Flet 0.80.x uses **lowercase** `ft.icons` for icon constants. Older versions or autocomplete may suggest `ft.Icons` (capitalized).
+
+**Fix**: Always use `ft.icons.ICON_NAME` (lowercase `icons`):
+
+```python
+# BAD — Flet 0.80.x
+ft.Icons.SHOPPING_CART
+ft.Icons.DARK_MODE
+
+# GOOD — Flet 0.80.x
+ft.icons.SHOPPING_CART
+ft.icons.DARK_MODE
+```
+
+To find and fix all instances:
+```powershell
+rg "ft\.Icons\." src/ --files-with-matches
+# Then replace ft.Icons. with ft.icons. in each file
+```
+
+---
+
+## Error 8: NavigationRail "Control's height is unbounded"
+
+**Symptom**: Red error overlay in UI:
+```
+Error displaying NavigationRail
+Control's height is unbounded. Either set "expand" property,
+set a fixed "height" or nest NavigationRail inside another
+control with a fixed height.
+```
+
+**Cause**: `ft.NavigationRail` requires a bounded height. Wrapping it in an `ft.Column` without a fixed height causes this error because Column doesn't propagate height constraints.
+
+**Fix**: Place the NavigationRail **directly in the main `ft.Row`** (which gets bounded height from `expand=True` on the Row). Do NOT wrap it in a Column or Container:
+
+```python
+# BAD — Column has unbounded height → NavigationRail error
+nav_column = ft.Column([nav_rail, some_button], expand=True)
+main_layout = ft.Row([nav_column, content], expand=True)
+
+# BAD — Container with expand=True shares space equally
+nav_container = ft.Container(content=nav_column, width=80, expand=True)
+
+# GOOD — NavigationRail directly in Row, use trailing for extra widgets
+nav_rail = ft.NavigationRail(
+    destinations=[...],
+    trailing=dark_mode_toggle,  # Use trailing slot for extra buttons
+)
+main_layout = ft.Row(
+    [nav_rail, ft.VerticalDivider(width=1), content_area],
+    spacing=0,
+    expand=True,
+    vertical_alignment=ft.CrossAxisAlignment.START,
+)
+```
+
+**Key rule**: NavigationRail's `trailing` property is the correct place to add widgets (like a dark mode toggle) below the destination icons. Never wrap the rail in a Column.
+
+---
+
+## Error 9: POS screen duplicated (two layouts stacked)
+
+**Symptom**: After login, the POS screen appears twice — two full layouts stacked vertically.
+
+**Cause**: Flet 0.80.x rendering issue with `page.clean()` + `page.add()` combined with default page scrolling and nested `expand=True` layouts.
+
+**Fix**:
+1. Disable page-level scrolling: `self.page.scroll = None`
+2. Replace `page.clean()` + `page.add(...)` with direct assignment:
+
+```python
+# BAD — can cause duplication in Flet 0.80.x
+self.page.clean()
+self.page.add(main_layout)
+
+# GOOD — direct assignment prevents duplication
+self.page.controls = [main_layout]
+self.page.update()
+```
+
+---
+
+## Running the App
+
+The app can be launched two ways:
+
+### Option 1: Unified launcher (recommended)
+```powershell
+python -m src.launcher
+```
+Starts both API (port 8000) and Flet UI (port 8080) in one process.
+
+### Option 2: Separate processes
+1. **API backend** (port 8000): `python -m src`
+2. **Flet UI** (port 8080): `python -m src.ui.app`
+
+Start the API first, then the UI.
+
+---
+
 ## Project-Specific Notes
 
-- Flet version pinned at **0.21.2** in `requirements.txt`
+- Flet version: **0.80.5** (check with `python -c "import flet; print(flet.__version__)"`)
 - Flet UI runs in `WEB_BROWSER` mode on port 8080
-- All screens (`auth_screen`, `pos_screen`, `products_screen`, `reports_screen`, `receipt_screen`) extend `ft.Column`
-- Screens make HTTP calls to the FastAPI backend -- use sync `httpx.Client`, never `asyncio.run()`
+- All screens extend `ft.Column` — **always use `self._page` not `self.page`**
+- Icon constants: **always `ft.icons.X`** (lowercase), never `ft.Icons.X`
+- NavigationRail: **always place directly in Row**, use `trailing` for extra widgets
+- Screens make HTTP calls to the FastAPI backend — use sync `httpx.Client`, never `asyncio.run()`
+- Page transitions: use `page.controls = [...]` + `page.update()`, never `page.clean()` + `page.add()`
+
+---
+
+## Error 10: `UnboundLocalError: cannot access local variable 'dlg'` in nested dialog callbacks
+
+**Symptom**: Clicking a button inside a dialog (e.g. "Confirm Payment") does nothing. Terminal shows:
+```
+UnboundLocalError: cannot access local variable 'dlg' where it is not associated with a value
+```
+
+**Cause**: Python 3.11+ scoping conflict. When an inner function both **reads** an outer variable (e.g. `dlg.open = False` to close the current dialog) AND **assigns** to the same name later (e.g. `dlg = ft.AlertDialog(...)` to create a follow-up dialog), Python treats the variable as local throughout the entire function. The first read fails because the local hasn't been assigned yet.
+
+**Example** (the HMS "Confirm Payment → Receipt" flow):
+```python
+def _handle_finalize(self, e):
+    ...
+    def confirm_payment(e):
+        dlg.open = False      # READ — Python thinks dlg is local (because of line below)
+        ...
+        dlg = ft.AlertDialog(  # ASSIGN — causes Python to treat dlg as local everywhere
+            title=ft.Text("Receipt"),
+            ...
+        )
+    
+    dlg = ft.AlertDialog(      # This is the OUTER dialog (payment)
+        title=ft.Text("Finalize"),
+        actions=[ft.ElevatedButton("Confirm", on_click=confirm_payment)],
+    )
+```
+
+**Fix**: Use `nonlocal dlg` AND rename the inner dialog to avoid shadowing:
+
+```python
+def confirm_payment(e):
+    nonlocal dlg              # Tells Python: dlg is from outer scope
+    dlg.open = False          # Now works — refers to outer payment dialog
+    ...
+    receipt_dlg = ft.AlertDialog(  # Different name — no shadowing
+        title=ft.Text("Receipt"),
+        ...
+    )
+    self._page.dialog = receipt_dlg
+    receipt_dlg.open = True
+    self._page.update()
+```
+
+**General rule**: In Flet dialog chains where one dialog opens another, always:
+1. Add `nonlocal dlg` if the callback needs to close the outer dialog
+2. Use distinct variable names for each dialog (`dlg`, `receipt_dlg`, `confirm_dlg`, etc.)
+
+---
+
+## Error 11: IntentParser routes "order ... pay cash" to `finalize_order` instead of `create_order`
+
+**Symptom**: In Command mode, typing "order 3 biryani for table 7 pay cash" returns "Cannot finalize order with no items" instead of creating an order.
+
+**Cause**: The `IntentParser.parse()` method checked for finalize keywords (`"pay "`, `"finalize"`, `"checkout"`) **before** order keywords. Since "pay" appears in "order 3 biryani for table 7 **pay** cash", it matched the finalize branch first and never reached the order-creation logic.
+
+**Fix**: Restructure the intent priority in `src/voice/intent_parser.py`:
+
+1. **Specific compound phrases first** — void, hold, create-product, stock-in, report (these have unambiguous keywords)
+2. **Item-name matching** — if text mentions actual inventory product names (biryani, coke, etc.), always route to `create_order` even if "pay" is present
+3. **Finalize-leading only** — `finalize_order` only when no item names or order-creation context is present
+4. **Generic order keywords** — fallback for "create order", "order for table 5", etc.
+
+```python
+# Priority order (abbreviated):
+# 1. void / hold / create-product / stock-in / report  (compound phrases)
+# 2. has_item_names → create_order  (even with "pay" keyword)
+# 3. finalize_kw AND NOT order_kw → finalize_order
+# 4. order_kw → create_order  (generic, may need follow-up)
+# 5. finalize_kw fallback → finalize_order
+```
+
+**General rule**: When adding new intents, always check that broader keyword matches (like "pay", "add", "order") don't shadow more specific intents. Test with compound sentences like "order X pay cash", "add 50 biryani to stock", "new product at 250".
+
+---
+
+## Agent & EventBus Debugging
+
+When agent-driven behavior is missing (e.g. no audit entries, no low-stock alerts, no print on finalize):
+
+### Verify event flow (event_log table)
+
+Events are persisted to the `event_log` table (migration `003_add_event_log.sql`). Use this to confirm that the API is publishing events and that the store is writing them.
+
+```sql
+-- Recent events (SQLite)
+SELECT id, event_type, payload, created_at
+FROM event_log
+ORDER BY created_at DESC
+LIMIT 20;
+```
+
+If no rows appear after an action (e.g. order finalized), the middleware may not be publishing, or the EventStore may not be wired.
+
+### EventBus debugging tips
+
+1. **Events not firing**: Ensure the FastAPI app uses the event middleware and that services call `event_bus.publish(event)` (or equivalent) for the relevant actions. Check `src/events/middleware.py` and the places that publish.
+2. **Handlers not called**: Subscriptions are registered at startup. Ensure `AgentRegistry` is populated and that each agent’s `subscribe()` is invoked during app startup (e.g. in `src/api/app.py` or wherever the bus and agents are wired).
+3. **Order of initialization**: EventBus → EventStore → register agents → then start handling requests. If the bus or store is `None` when publishing, you’ll get attribute errors or silent no-ops.
+
+### Common agent registration issues
+
+- **Agent not in registry**: Every agent that should react to events must be registered with `AgentRegistry.subscribe(event_type, handler)`. If an agent is instantiated but never subscribed, it will never receive events.
+- **Wrong event type**: Handler is subscribed to a different `event_type` than the one being published (e.g. subscribing to `order.created` but publishing `OrderCreated`). Ensure event type strings match exactly.
+- **Handler raises**: If one handler raises, the bus may stop dispatching to other handlers or the request may fail. Check logs for tracebacks from agent handlers; fix or catch exceptions so one failing agent doesn’t break others.
+- **Async vs sync**: If the bus or handlers are async, ensure they are awaited correctly from the request path. If handlers are sync but the bus runs in an async context, ensure the bus doesn’t deadlock (e.g. use `run_in_executor` or sync dispatch as appropriate).

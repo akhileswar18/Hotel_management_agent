@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Inventory Events Contract",
+  "description": "Event payload schemas for InventoryAgent",
+  "events": {
+    "inventory.stock_in": {
+      "payload": {
+        "type": "object",
+        "required": ["item_id", "quantity", "reference"],
+        "properties": {
+          "item_id": { "type": "string", "format": "uuid" },
+          "quantity": { "type": "integer", "minimum": 1 },
+          "reference": { "type": "string" },
+          "recorded_by": { "type": "string", "format": "uuid" }
+        }
+      },
+      "published_by": "API",
+      "consumed_by": ["InventoryAgent"]
+    },
+    "inventory.updated": {
+      "payload": {
+        "type": "object",
+        "required": ["item_id", "new_stock", "operation"],
+        "properties": {
+          "item_id": { "type": "string", "format": "uuid" },
+          "item_name": { "type": "string" },
+          "new_stock": { "type": "integer" },
+          "operation": { "type": "string", "enum": ["stock_in", "stock_out", "deduction", "reversal"] }
+        }
+      },
+      "published_by": "InventoryAgent",
+      "consumed_by": ["AuditAgent"]
+    },
+    "inventory.low_stock": {
+      "payload": {
+        "type": "object",
+        "required": ["item_id", "item_name", "current_stock", "reorder_level"],
+        "properties": {
+          "item_id": { "type": "string", "format": "uuid" },
+          "item_name": { "type": "string" },
+          "current_stock": { "type": "integer" },
+          "reorder_level": { "type": "integer" }
+        }
+      },
+      "published_by": "InventoryAgent",
+      "consumed_by": ["NotificationAgent", "InsightAgent"]
+    },
+    "inventory.out_of_stock": {
+      "payload": {
+        "type": "object",
+        "required": ["item_id", "item_name"],
+        "properties": {
+          "item_id": { "type": "string", "format": "uuid" },
+          "item_name": { "type": "string" }
+        }
+      },
+      "published_by": "InventoryAgent",
+      "consumed_by": ["NotificationAgent"]
+    }
+  }
+}

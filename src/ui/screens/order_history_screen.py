@@ -8,7 +8,8 @@ import flet as ft
 import httpx
 from datetime import date
 from src.ui.components.ui_helpers import (
-    HMSButton, HMSColors, show_error_dialog, show_success_dialog, create_header
+    HMSButton, HMSColors, show_error_dialog, show_success_dialog, show_success_toast, create_header,
+    RefreshButton,
 )
 
 
@@ -16,7 +17,7 @@ class OrderHistoryScreen(ft.Column):
     """Order history screen with search and filters."""
 
     def __init__(self, page: ft.Page, user_info: dict, on_back):
-        self.page = page
+        self._page = page
         self.user_info = user_info
         self.on_back = on_back
         self.api_base = "http://127.0.0.1:8000"
@@ -70,6 +71,13 @@ class OrderHistoryScreen(ft.Column):
             lambda e: on_back(),
         )
 
+        # Refresh button
+        self.refresh_button = RefreshButton(
+            on_refresh=self._load_orders,
+            page=self._page,
+            tooltip="Refresh orders",
+        )
+
         # Orders list
         self.orders_list = ft.ListView(
             spacing=8,
@@ -84,6 +92,7 @@ class OrderHistoryScreen(ft.Column):
                     [
                         ft.Text("Order History", size=20, weight="bold"),
                         ft.Container(expand=True),
+                        self.refresh_button,
                         back_button,
                     ],
                     spacing=10,
@@ -123,7 +132,7 @@ class OrderHistoryScreen(ft.Column):
         self.date_filter.value = date.today().isoformat()
         self._load_orders()
         try:
-            self.page.update()
+            self._page.update()
         except Exception:
             pass
 
@@ -132,9 +141,19 @@ class OrderHistoryScreen(ft.Column):
         self.date_filter.value = ""
         self._load_orders()
         try:
-            self.page.update()
+            self._page.update()
         except Exception:
             pass
+
+    def _handle_reprint(self, order: dict):
+        """Reprint receipt for a finalized order."""
+        try:
+            from src.infrastructure.printer import ESCPOSPrinter
+            printer = ESCPOSPrinter()
+            filepath = printer.print_receipt(order)
+            show_success_toast(self._page, f"Receipt saved: {filepath}")
+        except Exception as err:
+            show_error_dialog(self._page, "Print Error", str(err))
 
     def _load_orders(self):
         """Load orders from API with filters."""
