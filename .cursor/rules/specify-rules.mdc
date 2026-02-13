@@ -1,0 +1,32 @@
+﻿# Hotel_management_agent Development Guidelines
+
+Auto-generated from all feature plans. Last updated: 2026-02-12
+
+## Active Technologies
+- Python 3.11 + Flet 0.80.5 (UI), httpx (HTTP client), FastAPI (backend) (002-manual-sync-refresh)
+- SQLite (local, via existing backend API) (002-manual-sync-refresh)
+
+- Python 3.11+ + FastAPI, Flet 0.80.x, SQLite, bcrypt, httpx (existing) + new: `asyncio` (event bus), no external message brokers (main)
+
+## Project Structure
+
+```text
+src/
+tests/
+```
+
+## Commands
+
+cd src; pytest; ruff check .
+
+## Code Style
+
+Python 3.11+: Follow standard conventions
+
+## Recent Changes
+- 002-manual-sync-refresh: Added Python 3.11 + Flet 0.80.5 (UI), httpx (HTTP client), FastAPI (backend)
+
+- main: Added Python 3.11+ + FastAPI, Flet 0.80.x, SQLite, bcrypt, httpx (existing) + new: `asyncio` (event bus), no external message brokers
+
+<!-- MANUAL ADDITIONS START -->
+<!-- MANUAL ADDITIONS END -->

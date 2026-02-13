@@ -7,7 +7,7 @@ Services handle transactions, error handling, and workflow coordination.
 """
 
 from uuid import UUID, uuid4
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from typing import List, Optional, Tuple, Dict, Any
 import bcrypt
 import json
@@ -20,7 +20,7 @@ from src.domain import (
     validate_permission, InvalidDiscountError, InsufficientStockError,
 )
 from src.infrastructure import (
-    OrderRepository, ItemRepository, UserRepository,
+    OrderRepository, ItemRepository, UserRepository, SessionRepository,
     StockLedgerRepository, AuditLogRepository,
     PaymentRepository, VoidRecordRepository, Database,
 )
@@ -29,23 +29,17 @@ from src.infrastructure import (
 class AuthService:
     """User authentication and authorization service."""
 
+    SESSION_TIMEOUT_MINUTES = 30
+
     def __init__(self) -> None:
         """Initialize auth service."""
         self.user_repo = UserRepository()
+        self.session_repo = SessionRepository()
 
     def login(self, username: str, pin: str) -> Tuple[User, str]:
         """
         Authenticate user with username and PIN.
-
-        Args:
-            username: Username
-            pin: 4-6 digit PIN
-
-        Returns:
-            Tuple of (User, session_token)
-
-        Raises:
-            ValueError: If credentials invalid
+        Creates a server-side session with 30-minute expiry.
         """
         result = self.user_repo.get_by_username(username)
         if result is None:
@@ -53,26 +47,45 @@ class AuthService:
 
         user, pin_hash = result
 
-        # Verify PIN using bcrypt
         if not bcrypt.checkpw(pin.encode(), pin_hash.encode()):
             raise ValueError("Invalid username or PIN")
 
         session_token = str(uuid4())
+        expires_at = (datetime.utcnow() + timedelta(minutes=self.SESSION_TIMEOUT_MINUTES)).isoformat() + "Z"
+        self.session_repo.create_session(session_token, str(user.id), expires_at)
+
         return user, session_token
 
-    def logout(self, user_id: str) -> None:
-        """
-        Log out a user by invalidating their session.
+    def logout(self, user_id: str = None, session_token: str = None) -> None:
+        """Log out by invalidating the session."""
+        if session_token:
+            self.session_repo.invalidate_session(session_token)
+        elif user_id:
+            self.session_repo.invalidate_user_sessions(user_id)
 
-        Args:
-            user_id: ID of the user to log out
-
-        Note: In Phase 1, sessions are implicit (no server-side session store).
-              This method exists for API contract completeness.
+    def validate_session(self, session_token: str) -> Optional[User]:
         """
-        # Phase 1: Session management is client-side (token in memory).
-        # Phase 2 will add server-side session invalidation.
-        pass
+        Validate a session token. Returns User if valid, None if expired/invalid.
+        Also refreshes the session expiry on each valid call.
+        """
+        session = self.session_repo.get_session(session_token)
+        if not session:
+            return None
+
+        # Check expiry
+        expires_at = datetime.fromisoformat(session["expires_at"].replace("Z", "+00:00"))
+        now = datetime.utcnow().replace(tzinfo=expires_at.tzinfo)
+        if now > expires_at:
+            self.session_repo.invalidate_session(session_token)
+            return None
+
+        # Refresh expiry
+        new_expires = (datetime.utcnow() + timedelta(minutes=self.SESSION_TIMEOUT_MINUTES)).isoformat() + "Z"
+        self.session_repo.refresh_session(session_token, new_expires)
+
+        # Return user
+        user = self.user_repo.get(session["user_id"])
+        return user
 
     def hash_pin(self, pin: str) -> str:
         """Hash PIN using bcrypt."""
@@ -86,7 +99,7 @@ class AuthService:
 class SalesService:
     """Sales and order management service."""
 
-    TAX_RATE = 0.18  # 18% GST — configurable in Phase 2
+    TAX_RATE = 0.18  # 18% GST — configurable
 
     def __init__(self) -> None:
         """Initialize sales service."""
@@ -136,6 +149,10 @@ class SalesService:
     def get_order(self, order_id: UUID) -> Optional[Order]:
         """Fetch order by ID."""
         return self.order_repo.get(str(order_id))
+
+    def get_order_by_receipt_number(self, receipt_number: str) -> Optional[Order]:
+        """Fetch order by receipt number (finalized orders only)."""
+        return self.order_repo.get_by_receipt_number(receipt_number)
 
     def remove_item(self, order_id: UUID, line_item_id: UUID, user_id: UUID) -> Order:
         """
@@ -298,6 +315,19 @@ class SalesService:
         item = self.item_repo.get(str(item_id))
         if not item:
             raise ValueError(f"Item {item_id} not found")
+
+        # Stock validation: check available stock minus what's already in this order
+        current_stock = self.stock_repo.compute_stock_on_hand(str(item_id))
+        already_in_order = sum(
+            li.quantity for li in order.line_items if str(li.item_id) == str(item_id)
+        )
+        available = current_stock - already_in_order
+        if quantity > available:
+            raise ValueError(
+                f"Insufficient stock for {item.name}: "
+                f"available={available} (stock={current_stock}, in order={already_in_order}), "
+                f"requested={quantity}"
+            )
 
         # Create line item
         line_total = Money(cents=item.unit_price.cents * quantity)

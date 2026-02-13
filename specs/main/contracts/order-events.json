@@ -1,0 +1,116 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Order Events Contract",
+  "description": "Event payload schemas for OrderAgent",
+  "events": {
+    "order.create": {
+      "payload": {
+        "type": "object",
+        "required": ["table_id", "user_id"],
+        "properties": {
+          "table_id": { "type": "string" },
+          "user_id": { "type": "string", "format": "uuid" }
+        }
+      },
+      "published_by": "API",
+      "consumed_by": ["OrderAgent"]
+    },
+    "order.created": {
+      "payload": {
+        "type": "object",
+        "required": ["order_id", "table_id", "status", "created_at"],
+        "properties": {
+          "order_id": { "type": "string", "format": "uuid" },
+          "table_id": { "type": "string" },
+          "status": { "type": "string", "enum": ["draft"] },
+          "created_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "published_by": "OrderAgent",
+      "consumed_by": ["AuditAgent", "NotificationAgent"]
+    },
+    "order.add_item": {
+      "payload": {
+        "type": "object",
+        "required": ["order_id", "item_id", "quantity"],
+        "properties": {
+          "order_id": { "type": "string", "format": "uuid" },
+          "item_id": { "type": "string", "format": "uuid" },
+          "quantity": { "type": "integer", "minimum": 1 }
+        }
+      },
+      "published_by": "API",
+      "consumed_by": ["OrderAgent"]
+    },
+    "order.updated": {
+      "payload": {
+        "type": "object",
+        "required": ["order_id", "subtotal", "tax_amount", "total_amount"],
+        "properties": {
+          "order_id": { "type": "string", "format": "uuid" },
+          "subtotal": { "type": "number" },
+          "discount_amount": { "type": "number" },
+          "tax_amount": { "type": "number" },
+          "total_amount": { "type": "number" },
+          "line_items": { "type": "array" }
+        }
+      },
+      "published_by": "OrderAgent",
+      "consumed_by": ["AuditAgent"]
+    },
+    "order.finalize": {
+      "payload": {
+        "type": "object",
+        "required": ["order_id", "payment_method", "amount_tendered"],
+        "properties": {
+          "order_id": { "type": "string", "format": "uuid" },
+          "payment_method": { "type": "string", "enum": ["CASH", "CARD", "VOUCHER"] },
+          "amount_tendered": { "type": "number", "minimum": 0 }
+        }
+      },
+      "published_by": "API",
+      "consumed_by": ["OrderAgent"]
+    },
+    "order.finalized": {
+      "payload": {
+        "type": "object",
+        "required": ["order_id", "receipt_number", "total_amount"],
+        "properties": {
+          "order_id": { "type": "string", "format": "uuid" },
+          "receipt_number": { "type": "string" },
+          "total_amount": { "type": "number" },
+          "payment_method": { "type": "string" },
+          "change_due": { "type": "number" }
+        }
+      },
+      "published_by": "OrderAgent",
+      "consumed_by": ["PaymentAgent", "InventoryAgent", "PrintAgent", "AuditAgent"]
+    },
+    "order.void": {
+      "payload": {
+        "type": "object",
+        "required": ["order_id", "reason"],
+        "properties": {
+          "order_id": { "type": "string", "format": "uuid" },
+          "reason": { "type": "string", "minLength": 1 },
+          "approved_by": { "type": "string", "format": "uuid" }
+        }
+      },
+      "published_by": "API",
+      "consumed_by": ["OrderAgent"]
+    },
+    "order.error": {
+      "payload": {
+        "type": "object",
+        "required": ["error_code", "message"],
+        "properties": {
+          "order_id": { "type": "string" },
+          "error_code": { "type": "string" },
+          "message": { "type": "string" }
+        }
+      },
+      "published_by": "OrderAgent",
+      "consumed_by": ["NotificationAgent"]
+    }
+  }
+}

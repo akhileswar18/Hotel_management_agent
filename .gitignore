@@ -90,3 +90,6 @@ docker-compose.override.yml
 hms_dev.db
 test_*.db
 tmpclaude-*
+
+# Receipts output
+receipts/

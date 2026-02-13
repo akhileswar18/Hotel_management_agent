@@ -88,6 +88,15 @@ class OrderRepository(BaseRepository):
             return None
         return self._row_to_order(row)
 
+    def get_by_receipt_number(self, receipt_number: str) -> Optional[Order]:
+        """Fetch order by receipt number (for finalized orders)."""
+        query = "SELECT * FROM orders WHERE receipt_number = ?"
+        cursor = self.conn.execute(query, (receipt_number,))
+        row = cursor.fetchone()
+        if not row:
+            return None
+        return self._row_to_order(row)
+
     def list(self) -> List[Order]:
         """List all orders."""
         query = "SELECT * FROM orders ORDER BY created_at DESC"
@@ -450,6 +459,77 @@ class UserRepository(BaseRepository):
             created_by=UUID(row["created_by"]) if row["created_by"] else None,
             updated_by=UUID(row["updated_by"]) if row["updated_by"] else None,
         )
+
+
+class SessionRepository(BaseRepository):
+    """Repository for server-side session management."""
+
+    def create(self, entity: Any) -> Any:
+        """Not used; use create_session instead."""
+        raise NotImplementedError("Use create_session(session_id, user_id, expires_at)")
+
+    def get(self, entity_id: str) -> Optional[Any]:
+        """Get session by ID. Delegates to get_session."""
+        return self.get_session(entity_id)
+
+    def list(self) -> List[Any]:
+        """List active sessions (minimal implementation for BaseRepository)."""
+        return []
+
+    def create_session(self, session_id: str, user_id: str, expires_at: str) -> None:
+        """Create a new session record."""
+        from datetime import datetime
+        query = """
+            INSERT INTO sessions (id, user_id, login_at, expires_at)
+            VALUES (?, ?, ?, ?)
+        """
+        params = (session_id, user_id, datetime.utcnow().isoformat() + "Z", expires_at)
+        self.conn.execute(query, params)
+        self.conn.commit()
+
+    def get_session(self, session_id: str) -> Optional[dict]:
+        """Get session by ID. Returns None if not found or expired."""
+        query = "SELECT * FROM sessions WHERE id = ? AND logout_at IS NULL"
+        cursor = self.conn.execute(query, (session_id,))
+        row = cursor.fetchone()
+        if not row:
+            return None
+        return {
+            "id": row["id"],
+            "user_id": row["user_id"],
+            "login_at": row["login_at"],
+            "expires_at": row["expires_at"],
+            "logout_at": row["logout_at"],
+        }
+
+    def invalidate_session(self, session_id: str) -> None:
+        """Mark session as logged out."""
+        from datetime import datetime
+        query = "UPDATE sessions SET logout_at = ? WHERE id = ?"
+        self.conn.execute(query, (datetime.utcnow().isoformat() + "Z", session_id))
+        self.conn.commit()
+
+    def refresh_session(self, session_id: str, new_expires_at: str) -> None:
+        """Extend session expiry (called on each valid request)."""
+        query = "UPDATE sessions SET expires_at = ? WHERE id = ? AND logout_at IS NULL"
+        self.conn.execute(query, (new_expires_at, session_id))
+        self.conn.commit()
+
+    def invalidate_user_sessions(self, user_id: str) -> None:
+        """Invalidate all sessions for a user (used on password change or deactivation)."""
+        from datetime import datetime
+        query = "UPDATE sessions SET logout_at = ? WHERE user_id = ? AND logout_at IS NULL"
+        self.conn.execute(query, (datetime.utcnow().isoformat() + "Z", user_id))
+        self.conn.commit()
+
+    def cleanup_expired(self) -> int:
+        """Mark expired sessions as logged out. Returns count cleaned."""
+        from datetime import datetime
+        now = datetime.utcnow().isoformat() + "Z"
+        query = "UPDATE sessions SET logout_at = ? WHERE expires_at < ? AND logout_at IS NULL"
+        cursor = self.conn.execute(query, (now, now))
+        self.conn.commit()
+        return cursor.rowcount
 
 
 class StockLedgerRepository(BaseRepository):

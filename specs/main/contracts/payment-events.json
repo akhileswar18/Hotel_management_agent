@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Payment Events Contract",
+  "description": "Event payload schemas for PaymentAgent",
+  "events": {
+    "payment.process": {
+      "payload": {
+        "type": "object",
+        "required": ["order_id", "method", "amount"],
+        "properties": {
+          "order_id": { "type": "string", "format": "uuid" },
+          "method": { "type": "string", "enum": ["CASH", "CARD", "VOUCHER"] },
+          "amount": { "type": "number", "minimum": 0 },
+          "tendered": { "type": "number", "minimum": 0 }
+        }
+      },
+      "published_by": "OrderAgent",
+      "consumed_by": ["PaymentAgent"]
+    },
+    "payment.completed": {
+      "payload": {
+        "type": "object",
+        "required": ["payment_id", "order_id", "method", "amount"],
+        "properties": {
+          "payment_id": { "type": "string", "format": "uuid" },
+          "order_id": { "type": "string", "format": "uuid" },
+          "method": { "type": "string" },
+          "amount": { "type": "number" },
+          "change": { "type": "number" }
+        }
+      },
+      "published_by": "PaymentAgent",
+      "consumed_by": ["AuditAgent"]
+    },
+    "payment.failed": {
+      "payload": {
+        "type": "object",
+        "required": ["order_id", "reason"],
+        "properties": {
+          "order_id": { "type": "string", "format": "uuid" },
+          "reason": { "type": "string" }
+        }
+      },
+      "published_by": "PaymentAgent",
+      "consumed_by": ["NotificationAgent"]
+    }
+  }
+}

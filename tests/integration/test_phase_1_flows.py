@@ -195,16 +195,12 @@ class TestFinalizeOrder:
             )
 
     def test_finalize_insufficient_stock_fails(self, sample_user, stocked_item):
-        """Cannot finalize if stock is insufficient for any line item."""
+        """Cannot add items exceeding available stock."""
         svc = SalesService()
         order = svc.create_order(table_id="1", created_by=sample_user.id)
-        # Try to sell 999 units (only 100 in stock)
-        svc.add_item(order.id, stocked_item.id, quantity=999, added_by=sample_user.id)
-
-        with pytest.raises(InsufficientStockError):
-            svc.finalize_order(
-                order.id, PaymentMethod.CASH, Money.from_float(99999.0), sample_user.id
-            )
+        # Try to sell 999 units (only 100 in stock) — rejected at add_item
+        with pytest.raises(ValueError, match="Insufficient stock"):
+            svc.add_item(order.id, stocked_item.id, quantity=999, added_by=sample_user.id)
 
     def test_finalize_audit_logged(self, sample_user, stocked_item):
         """Finalization creates a FINALIZE entry in the audit log."""

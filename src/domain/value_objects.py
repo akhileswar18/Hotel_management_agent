@@ -104,5 +104,5 @@ class Money:
         return f"₹{self.to_float():.2f}"
 
 
-# TODO: Add CurrencyCode enum for Phase 2+ multi-currency support
+# TODO: Add CurrencyCode enum for multi-currency support
 # TODO: Add ExchangeRate value object for currency conversion

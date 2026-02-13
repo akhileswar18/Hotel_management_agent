@@ -12,6 +12,8 @@ from src.ui.screens.products_screen import ProductsScreen
 from src.ui.screens.order_history_screen import OrderHistoryScreen
 from src.ui.screens.reports_screen import ReportsScreen
 from src.ui.screens.receipt_screen import ReceiptScreen
+from src.ui.screens.user_mgmt_screen import UserManagementScreen
+from src.ui.screens.chat_screen import ChatScreen
 
 
 class HMSApp:
@@ -31,6 +33,17 @@ class HMSApp:
         # Current state
         self.current_user = None
         self.current_screen = None
+
+        # Global error banner
+        self.error_banner = ft.Banner(
+            bgcolor="#F44336",
+            leading=ft.Icon(ft.icons.ERROR, color="#FFFFFF"),
+            content=ft.Text("", color="#FFFFFF"),
+            actions=[
+                ft.TextButton("Dismiss", style=ft.ButtonStyle(color="#FFFFFF"),
+                    on_click=self._dismiss_banner),
+            ],
+        )
 
         # Show login screen initially
         self._show_login_screen()
@@ -53,34 +66,61 @@ class HMSApp:
 
     def _show_pos_screen(self):
         """Display main POS screen with navigation rail."""
-        # Create main navigation
+        user_role = self.current_user.get("role", "WAITER").upper()
+        is_manager_or_admin = user_role in ("MANAGER", "ADMIN")
+
+        destinations = [
+            ft.NavigationRailDestination(
+                icon=ft.icons.SHOPPING_CART,
+                selected_icon=ft.icons.SHOPPING_CART,
+                label="POS",
+            ),
+            ft.NavigationRailDestination(
+                icon=ft.icons.INVENTORY_2,
+                selected_icon=ft.icons.INVENTORY_2,
+                label="Products",
+            ),
+            ft.NavigationRailDestination(
+                icon=ft.icons.HISTORY,
+                selected_icon=ft.icons.HISTORY,
+                label="Orders",
+            ),
+            ft.NavigationRailDestination(
+                icon=ft.icons.ASSESSMENT,
+                selected_icon=ft.icons.ASSESSMENT,
+                label="Reports",
+            ),
+            ft.NavigationRailDestination(
+                icon=ft.icons.CHAT,
+                selected_icon=ft.icons.CHAT,
+                label="Chat",
+            ),
+        ]
+        if is_manager_or_admin:
+            destinations.append(
+                ft.NavigationRailDestination(
+                    icon=ft.icons.PEOPLE,
+                    selected_icon=ft.icons.PEOPLE,
+                    label="Users",
+                ),
+            )
+
+        # Dark mode toggle (placed inside nav rail's trailing slot)
+        dark_mode_toggle = ft.IconButton(
+            icon=ft.icons.DARK_MODE if self.page.theme_mode == ft.ThemeMode.LIGHT else ft.icons.LIGHT_MODE,
+            icon_color="#757575",
+            tooltip="Toggle dark/light mode",
+            on_click=self._toggle_theme,
+        )
+        self.dark_mode_btn = dark_mode_toggle
+
         nav_rail = ft.NavigationRail(
             selected_index=0,
             label_type=ft.NavigationRailLabelType.ALL,
             min_width=60,
-            destinations=[
-                ft.NavigationRailDestination(
-                    icon=ft.icons.SHOPPING_CART,
-                    selected_icon=ft.icons.SHOPPING_CART,
-                    label="POS",
-                ),
-                ft.NavigationRailDestination(
-                    icon=ft.icons.INVENTORY_2,
-                    selected_icon=ft.icons.INVENTORY_2,
-                    label="Products",
-                ),
-                ft.NavigationRailDestination(
-                    icon=ft.icons.HISTORY,
-                    selected_icon=ft.icons.HISTORY,
-                    label="Orders",
-                ),
-                ft.NavigationRailDestination(
-                    icon=ft.icons.ASSESSMENT,
-                    selected_icon=ft.icons.ASSESSMENT,
-                    label="Reports",
-                ),
-            ],
+            destinations=destinations,
             on_change=self._handle_nav_change,
+            trailing=dark_mode_toggle,
         )
 
         # POS screen
@@ -111,8 +151,23 @@ class HMSApp:
             on_back=lambda: self._switch_screen(0),
         )
 
-        # Store references
-        self.screens = [pos_screen, products_screen, order_history_screen, reports_screen]
+        # Chat screen
+        chat_screen = ChatScreen(
+            self.page,
+            user_role=user_role,
+            user_id=self.current_user.get("user_id", ""),
+        )
+
+        # User management screen (manager/admin only)
+        if is_manager_or_admin:
+            user_mgmt_screen = UserManagementScreen(
+                self.page,
+                self.current_user,
+                on_back=lambda: self._switch_screen(0),
+            )
+            self.screens = [pos_screen, products_screen, order_history_screen, reports_screen, chat_screen, user_mgmt_screen]
+        else:
+            self.screens = [pos_screen, products_screen, order_history_screen, reports_screen, chat_screen]
         self.nav_rail = nav_rail
         self.current_nav_index = 0
 
@@ -122,7 +177,7 @@ class HMSApp:
             expand=True,
         )
 
-        # Main layout — single Row fills the entire page
+        # Main layout — nav rail directly in Row (bounded height from Row)
         main_layout = ft.Row(
             [
                 nav_rail,
@@ -137,6 +192,28 @@ class HMSApp:
         self.page.controls = [main_layout]
         self.page.update()
         self.current_screen = "pos"
+
+    def _toggle_theme(self, e):
+        """Toggle between light and dark mode."""
+        if self.page.theme_mode == ft.ThemeMode.LIGHT:
+            self.page.theme_mode = ft.ThemeMode.DARK
+            self.dark_mode_btn.icon = ft.icons.LIGHT_MODE
+        else:
+            self.page.theme_mode = ft.ThemeMode.LIGHT
+            self.dark_mode_btn.icon = ft.icons.DARK_MODE
+        self.page.update()
+
+    def _dismiss_banner(self, e):
+        """Dismiss error banner."""
+        self.page.banner = None
+        self.page.update()
+
+    def show_global_error(self, message: str):
+        """Show a global error banner at the top of the page."""
+        self.error_banner.content = ft.Text(message, color="#FFFFFF")
+        self.page.banner = self.error_banner
+        self.page.banner.open = True
+        self.page.update()
 
     def _handle_nav_change(self, e):
         """Handle navigation rail selection."""
@@ -175,6 +252,4 @@ if __name__ == "__main__":
 
 
 # TODO: Add offline mode indicator
-# TODO: Add theme switcher (dark/light)
-# TODO: Add accessibility settings
-# TODO: Add multi-language support (Phase 2)
+# TODO: Add accessibility settings (beyond Phase 7)

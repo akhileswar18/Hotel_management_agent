@@ -169,6 +169,6 @@ class AuditLogEntry:
     reason: Optional[str] = None
 
 
-# TODO: Add Supplier entity (Phase 2)
-# TODO: Add PurchaseOrder entity (Phase 2)
-# TODO: Add LoyaltyAccount entity (Phase 3)
+# TODO: Add Supplier entity (future)
+# TODO: Add PurchaseOrder entity (future)
+# TODO: Add LoyaltyAccount entity (future)

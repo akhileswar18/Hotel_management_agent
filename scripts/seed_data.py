@@ -21,13 +21,14 @@ project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
 from src.infrastructure.database import DatabaseConfig
-from src.application import AuthService
+from src.application import AuthService, SalesService
 from src.infrastructure import (
     UserRepository, ItemRepository, StockLedgerRepository,
     Database
 )
 from src.domain import (
-    User, Item, Money, Role, StockLedgerEntry, TransactionType
+    User, Item, Money, Role, StockLedgerEntry, TransactionType,
+    PaymentMethod,
 )
 
 
@@ -44,20 +45,24 @@ def seed_database():
         return
 
     # Create users
-    print("[1/4] Creating sample users...")
+    print("[1/5] Creating sample users...")
     _seed_users(db)
 
     # Create items
-    print("[2/4] Creating sample products...")
+    print("[2/5] Creating sample products...")
     _seed_items(db)
 
     # Create sample tables
-    print("[3/4] Creating sample tables...")
+    print("[3/5] Creating sample tables...")
     _seed_tables(db)
 
     # Create stock ledger entries
-    print("[4/4] Creating initial stock...")
+    print("[4/5] Creating initial stock...")
     _seed_stock_ledger(db)
+
+    # Create sample orders (finalized, held, voided) for demo and reports
+    print("[5/5] Creating sample orders...")
+    _seed_sample_orders(db)
 
     print("\n" + "=" * 60)
     print("[OK] Seeding complete!")
@@ -119,6 +124,21 @@ def _seed_items(db: Database):
         ("Dosa", "South Indian", 120.00, 15),
         ("Idli", "South Indian", 80.00, 20),
         ("Lassi", "Beverages", 70.00, 25),
+        ("Pulao", "Rice Dishes", 200.00, 15),
+        ("Dal Makhani", "Curries", 180.00, 20),
+        ("Raita", "Sides", 60.00, 30),
+        ("Gulab Jamun", "Desserts", 80.00, 25),
+        ("Chai", "Beverages", 30.00, 100),
+        ("Coffee", "Beverages", 50.00, 80),
+        ("Roti", "Breads", 25.00, 40),
+        ("Paratha", "Breads", 55.00, 30),
+        ("Upma", "South Indian", 90.00, 20),
+        ("Vada", "South Indian", 40.00, 35),
+        ("Uttapam", "South Indian", 100.00, 15),
+        ("Chicken Tikka", "Appetizers", 220.00, 12),
+        ("Veg Thali", "Combos", 280.00, 15),
+        ("Lemonade", "Beverages", 55.00, 40),
+        ("Plain Rice", "Rice Dishes", 80.00, 25),
     ]
 
     item_repo = ItemRepository()
@@ -238,9 +258,88 @@ def _seed_stock_ledger(db: Database):
         print(f"  [OK] {item.name}: {initial_qty} units")
 
 
+def _seed_sample_orders(db: Database):
+    """Create realistic sample orders: finalized, held, voided, and a few days of history."""
+    try:
+        from src.application.services import SalesService
+        from datetime import timedelta
+
+        user_repo = UserRepository()
+        item_repo = ItemRepository()
+        users = user_repo.list()
+        items = item_repo.list()
+        if not users or not items:
+            print("  [SKIP] Need users and items first; skipping sample orders")
+            return
+
+        waiter = next((u for u in users if u.role.value == "WAITER"), users[0])
+        manager = next((u for u in users if u.role.value == "MANAGER"), users[0])
+        cashier = next((u for u in users if u.role.value == "CASHIER"), users[0])
+
+        svc = SalesService()
+        table_ids = ["1", "2", "3", "4", "5", "6", "7", "8"]
+
+        # --- Finalized orders (5–10) for demo and reports ---
+        finalized = 0
+        for i in range(8):
+            try:
+                order = svc.create_order(table_id=table_ids[i % len(table_ids)], created_by=waiter.id)
+                # Add 1–3 items per order
+                for j in range((i % 3) + 1):
+                    item = items[j % len(items)]
+                    svc.add_item(order.id, item.id, quantity=1 + (i + j) % 2, added_by=waiter.id)
+                total = svc.get_order(order.id).total_amount
+                svc.finalize_order(
+                    order.id, PaymentMethod.CASH,
+                    Money.from_float(max(total.to_float() + 50, 500.0)),
+                    cashier.id,
+                )
+                finalized += 1
+            except Exception as e:
+                print(f"  [SKIP] Finalized order {i + 1}: {e}")
+
+        # --- Held orders ---
+        for i in range(2):
+            try:
+                order = svc.create_order(table_id=table_ids[i], created_by=waiter.id)
+                svc.add_item(order.id, items[0].id, quantity=1, added_by=waiter.id)
+                svc.hold_order(order.id, waiter.id)
+                print(f"  [OK] Held order on table {table_ids[i]}")
+            except Exception as e:
+                print(f"  [SKIP] Held order: {e}")
+
+        # --- Voided orders ---
+        for i in range(2):
+            try:
+                order = svc.create_order(table_id=table_ids[i + 2], created_by=waiter.id)
+                svc.add_item(order.id, items[1].id, quantity=1, added_by=waiter.id)
+                svc.void_order(order.id, reason="Wrong order / demo void", voided_by=cashier.id, approved_by=manager.id)
+                print(f"  [OK] Voided order on table {table_ids[i + 2]}")
+            except Exception as e:
+                print(f"  [SKIP] Voided order: {e}")
+
+        # Backdate some orders for “a few days of transaction history”
+        conn = db._connection
+        if conn and finalized > 0:
+            cursor = conn.execute(
+                "SELECT id FROM orders WHERE status = 'finalized' ORDER BY created_at DESC LIMIT ?",
+                (min(5, finalized),),
+            )
+            rows = cursor.fetchall()
+            for idx, row in enumerate(rows):
+                days_ago = (idx % 3) + 1  # 1, 2, or 3 days ago
+                backdate = (datetime.utcnow() - timedelta(days=days_ago)).isoformat() + "Z"
+                conn.execute(
+                    "UPDATE orders SET created_at = ?, updated_at = ? WHERE id = ?",
+                    (backdate, backdate, row["id"]),
+                )
+            conn.commit()
+            print(f"  [OK] Backdated {len(rows)} orders for multi-day history")
+
+        print(f"  [OK] Sample orders: {finalized} finalized, 2 held, 2 voided")
+    except Exception as e:
+        print(f"  [SKIP] Sample orders: {e}")
+
+
 if __name__ == "__main__":
     seed_database()
-
-# TODO: Add more realistic sample data
-# TODO: Add sample orders for testing reports
-# TODO: Add transaction history for demonstration

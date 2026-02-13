@@ -1,12 +1,49 @@
 # HMS Technical Architecture & Implementation Plan
 
-**Version**: 1.0 | **Date**: February 9, 2026 | **Status**: Technical Blueprint
+**Version**: 3.0 | **Date**: February 13, 2026 | **Status**: Feature-Complete Implementation (Agent-Based)
 
 ---
 
 ## 1. Architecture Overview
 
-### 1.1 High-Level Layered Architecture
+### 1.1 Agent-Based Architecture Overview
+
+The system uses an **event-driven agent architecture** on top of the layered stack. Domain events (e.g. order created, order finalized, payment processed) are published to an **EventBus**. Specialized **agents** subscribe to event types and react asynchronously (audit, inventory checks, printing, notifications, reporting). The **OrchestratorAgent** coordinates voice/chat: it parses user intent (STT/text), calls tools via the API, and streams responses. All agents are registered in an **AgentRegistry** and subscribe by event type; the EventBus delivers each event to every subscriber for that type.
+
+**Key components:**
+- **EventBus** — in-process pub/sub; events persisted to `event_log` for replay and debugging
+- **EventStore** — append-only persistence of events (migration `003_add_event_log.sql`)
+- **AgentRegistry** — registers agents and their subscriptions (event type → list of handlers)
+- **11 agents** — OrderAgent, AuditAgent, InventoryAgent, PaymentAgent, AuthAgent, PrintAgent, NotificationAgent, ReportingAgent, InsightAgent, OrchestratorAgent (plus AuditAgent as primary audit subscriber)
+
+**Event flow (text-based diagram):**
+```
+  [API / Services]  →  publish(Event)  →  EventBus
+                                              │
+                    ┌─────────────────────────┼─────────────────────────┐
+                    ▼                         ▼                         ▼
+              OrderAgent               AuditAgent              InventoryAgent
+              (order lifecycle)        (immutable log)        (low/out-of-stock)
+                    │                         │                         │
+                    └─────────────────────────┼─────────────────────────┘
+                                              ▼
+                    ┌─────────────────────────┼─────────────────────────┐
+                    ▼                         ▼                         ▼
+              PaymentAgent              PrintAgent            NotificationAgent
+                    │                         │                         │
+                    └─────────────────────────┼─────────────────────────┘
+                                              ▼
+                    ┌─────────────────────────┼─────────────────────────┐
+                    ▼                         ▼                         ▼
+              ReportingAgent            InsightAgent            (OrchestratorAgent
+              (reports on events)        (LLM upsell/trends)     for voice/chat only)
+```
+
+**Agent registry and subscription model:** Each agent subclasses `BaseAgent`, implements `handle(event)` (or topic-specific handlers), and registers with `AgentRegistry.subscribe(event_type, handler)`. On startup, the API wires the EventBus to the middleware that publishes from service layer; the bus invokes all subscribed handlers for each event type. No agent depends on another; they only depend on the event payload.
+
+**Voice/Chat pipeline:** User input (voice or text) → STT (Whisper, optional) → text → OrchestratorAgent → IntentParser (LLM or rule-based) → tool calls (create order, add item, query stock, etc.) → API → results streamed back; TTS (pyttsx3, optional) for voice. Voice and LLM are optional; the system works fully without them.
+
+### 1.2 High-Level Layered Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -40,12 +77,12 @@
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-### 1.2 Deployment Model
+### 1.3 Deployment Model
 
 - **Single-Device Desktop Application**: Runs on one device (tablet, laptop, desktop)
 - **Embedded Backend**: FastAPI server runs locally on the same device (not over network)
 - **No External Services Required**: All critical workflows operate without internet
-- **Local Source of Truth**: SQLite database is authoritative; cloud is optional backup (Phase 3+)
+- **Local Source of Truth**: SQLite database is authoritative; cloud is optional backup (Phase 3 complete)
 - **Opportunistic Sync**: When internet available, background sync sends changes to cloud
 
 ---
@@ -125,12 +162,12 @@ TTS (if voice) → Speak Result to User
 - **Confirmation Before Execution**: Sensitive actions (void, discount >5%, stock adjustment) require explicit user confirmation
 - **Audit Trail**: Log transcript, parsed intent, validation result, executed action
 
-**Local LLM Choice** (Phase 2+):
+**Local LLM Choice** (Phase 2, implemented):
 - **Ollama** or **LocalAI** with Mistral-7B / Llama2-7B
 - Runs locally, ≤2GB RAM, inference ≤500ms
 - Fallback: Rule-based intent parsing for Phase 1 (if LLM unavailable)
 
-**Voice Pipeline** (Phase 2+):
+**Voice Pipeline** (Phase 2, implemented):
 
 ```
 Audio Input
@@ -266,7 +303,7 @@ GET    /api/reports/daily-sales       # Daily summary
 GET    /api/reports/inventory-snapshot # Inventory snapshot
 GET    /api/reports/transactions      # Search transactions
 
-WS     /ws/voice                      # WebSocket for voice I/O (Phase 2)
+WS     /ws/voice                      # WebSocket for voice I/O (Phase 2, implemented)
 ```
 
 **Transaction & Consistency**:
@@ -598,7 +635,7 @@ class OrderRepository:
 
 **Sync Queue** (Offline-First):
 - Every state-changing operation appends to `sync_queue` table
-- Sync worker reads unsyncced entries, sends to cloud (Phase 3+)
+- Sync worker reads unsyncced entries, sends to cloud (Phase 3 complete)
 - Idempotency key: operation_id (UUID) prevents duplicate syncs
 - Conflict rules: last-write-wins for non-critical; reject-on-conflict for financial
 
@@ -797,7 +834,7 @@ Concurrent (Background):
 └──────────────────────────────────────────────┘
 ```
 
-### 4.2 Voice Order Entry Flow (Phase 2+)
+### 4.2 Voice Order Entry Flow (Phase 2, implemented)
 
 ```
 ┌─────────────────────────────────────────┐
@@ -1242,7 +1279,7 @@ async def void_order(order_id: str, current_user: User = Depends(get_current_use
 - **PIN Storage**: Hashed with bcrypt (never plaintext)
 - **Cached Credentials**: Device-level encryption (OS-provided)
 - **Payment Details**: Last 4 digits only (never full card number)
-- **Audit Logs**: Encrypted at rest (Phase 2+, if sensitive data)
+- **Audit Logs**: Encrypted at rest (Phase 2 implemented, if sensitive data)
 
 ---
 
@@ -1373,7 +1410,7 @@ cp ~/hms-backup-2026-02-09.db ~/.hms/database.db
 
 ### 12.2 Phase 2 & 3 Rollout
 
-- **Over-the-air updates**: Check cloud for newer version (Phase 3+)
+- **Over-the-air updates**: Check cloud for newer version (Phase 3 complete)
 - **Data migration**: SQLite schema versioning + migration scripts
 - **Gradual rollout**: Opt-in beta for voice features (Phase 2)
 
@@ -1420,5 +1457,5 @@ This architecture is **offline-first by design**, with every component (UI, back
 
 ---
 
-**Status**: ✅ **Approved** | **Last Updated**: 2026-02-09 | **Next Review**: 2026-04-30
+**Status**: ✅ **Approved** | **Last Updated**: 2026-02-13 | **Next Review**: 2026-04-30
 

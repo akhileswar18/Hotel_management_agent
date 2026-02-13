@@ -1,9 +1,9 @@
-# Hotel Management System (HMS) - Phase 1 MVP
+# Hotel Management System (HMS) - Complete v3.0
 
 **Offline-first, voice-enabled sales, inventory, and reporting system for hotels and restaurants.**
 
-![Status](https://img.shields.io/badge/Status-Phase%201%20MVP-blue)
-![Version](https://img.shields.io/badge/Version-0.1.0-green)
+![Status](https://img.shields.io/badge/Status-Complete%20v3.0-brightgreen)
+![Version](https://img.shields.io/badge/Version-3.0.0-green)
 
 ---
 
@@ -11,20 +11,92 @@
 
 HMS is a lightweight, deterministic point-of-sale (POS) and inventory management system designed for small-to-medium hospitality businesses. It works seamlessly offline with local SQLite storage, requires minimal staff training, and provides complete audit trails for compliance.
 
-### Key Features (Phase 1)
-- ✅ **Offline-First**: Works without internet; sync later (Phase 2+)
-- ✅ **Fast POS**: Create & finalize orders in seconds
-- ✅ **Inventory Tracking**: Append-only ledger prevents data loss
-- ✅ **User Roles**: Waiter, Cashier, Manager, Clerk, Admin
-- ✅ **Audit Logs**: Every transaction immutably recorded
-- ✅ **Daily Reports**: Sales summary & inventory snapshot
-- ✅ **Touch-Friendly UI**: Built with Flet, optimized for tablets
+### Features (All Phases Complete)
 
-### Non-Features (Phase 1)
-- ❌ Cloud sync (Phase 2+)
-- ❌ Voice/AI assistant (Phase 2+)
-- ❌ Multi-branch management (Phase 3+)
-- ❌ Advanced analytics (Phase 3+)
+**Agent-Based Architecture**
+- Event-driven EventBus with persisted event log
+- 11 agents: OrderAgent, AuditAgent, InventoryAgent, PaymentAgent, AuthAgent, PrintAgent, NotificationAgent, ReportingAgent, InsightAgent, OrchestratorAgent
+- AgentRegistry subscription model; events published from API/services, agents react asynchronously
+- Full system works without voice or LLM (optional enhancements)
+
+**Voice/Chat Interface**
+- Voice input (Whisper STT) and text chat via WebSocket
+- OrchestratorAgent parses intent and calls tools (create order, add item, query stock, etc.)
+- Optional TTS (pyttsx3) for spoken responses
+- Chat screen in Flet UI for assistant-style interaction
+
+**LLM-Powered Insights**
+- InsightAgent for upsell suggestions, trends, and natural-language queries
+- Configurable LLM (Ollama local or OpenAI cloud); degradable when unavailable
+- Optional; core POS and reporting work without LLM
+
+**Core POS**
+- Offline-first order creation and management
+- Add items, edit quantities, remove line items
+- Hold and resume orders
+- Apply discounts (percentage or absolute, up to 50%)
+- Finalize with Cash, Card, or Voucher
+- Void orders with reason and audit trail
+- Stock validation prevents overselling
+- Keyboard shortcuts (F2 New Order, F5 Finalize, F8 Hold, F9 Resume)
+
+**Inventory Management**
+- Product catalog with categories
+- Record stock-in with references
+- Append-only stock ledger (audit-safe)
+- Low-stock alerts and reorder levels
+- Edit product details (price, reorder level)
+- Archive/soft-delete products
+- Category filtering
+
+**Reporting & Analytics**
+- Daily sales summary with revenue, transaction count, avg order value
+- Payment method breakdown
+- Top-selling items
+- Inventory snapshot with low-stock count
+- Date range filtering
+- Transaction search by date and payment method
+- CSV export for sales and inventory
+
+**Authentication & Security**
+- PIN-based login (bcrypt-hashed)
+- Role-based access: Waiter, Cashier, Manager, Clerk, Admin
+- Server-side sessions with 30-minute auto-expiry
+- User management (create, edit roles, reset PINs) for managers
+- Rate limiting (100 req/min per IP)
+- Security headers (X-Frame-Options, XSS protection)
+- Input length validation
+
+**Receipt & Printing**
+- ESC/POS thermal printer integration
+- Text file receipt backup (receipts/ folder)
+- Email receipts via SMTP (HTML + plain text)
+- Reprint from order history
+- Digital receipt URL with copy-to-clipboard
+
+**UI & Accessibility**
+- Touch-friendly interface (Flet, runs in browser)
+- Dark mode toggle
+- WCAG AAA color contrast
+- Toast notifications (non-blocking)
+- Global error banner
+- Navigation rail with role-based visibility
+
+**Data & DevOps**
+- SQLite database with WAL mode
+- Database backup/restore with CLI
+- DB vacuum for space reclamation
+- PyInstaller standalone executable
+- Docker containerization
+- GitHub Actions CI/CD
+- i18n framework (English + Hindi)
+- Performance benchmarks (1000+ txn/day)
+
+**Audit & Compliance**
+- Immutable audit log for every state change
+- Structured logging to DB + rotating files
+- Append-only stock ledger
+- Complete order lifecycle tracking
 
 ---
 
@@ -68,7 +140,7 @@ pip install -r requirements-dev.txt
 # Copy example config
 cp .env.example .env
 
-# Edit .env if needed (defaults work for Phase 1)
+# Edit .env if needed (defaults work out of the box)
 # DATABASE_URL=sqlite:///./hms.db
 # LOG_LEVEL=INFO
 # API_PORT=8000
@@ -81,10 +153,14 @@ python -m migrations.runner apply
 
 #### 6. Run Application
 ```bash
-# Option A: Start API server only (for testing)
+# Option A: Unified Launcher (Recommended)
+python -m src.launcher
+# Opens API on port 8000 and UI on port 8080 automatically.
+
+# Option B: Start API server only (for testing)
 python -m src
 
-# Option B: Run specific parts
+# Option C: Run specific parts
 # python -c "from src.infrastructure import Database; Database()"  # Test DB
 # pytest tests/ -v --cov=src  # Run tests
 ```
@@ -107,12 +183,35 @@ src/
 │   └── services.py        # SalesService, InventoryService, AuthService
 ├── infrastructure/      # Database, repositories, I/O
 │   ├── database.py        # SQLite connection & init
-│   ├── repositories.py    # OrderRepository, ItemRepository, etc.
+│   ├── repositories.py   # OrderRepository, ItemRepository, etc.
 │   └── logging_handler.py # Structured logging
-├── api/                 # FastAPI endpoints
-│   └── app.py           # REST API (FastAPI app)
-└── ui/                  # Flet UI (Phase 1 stub)
-    └── screens/         # Login, POS, Products, Reports screens
+├── events/              # EventBus and event persistence
+│   ├── event.py           # Event model
+│   ├── store.py           # EventStore (event_log table)
+│   ├── bus.py             # EventBus pub/sub
+│   └── middleware.py     # Publish events from API
+├── agents/               # Event-driven agents
+│   ├── base.py            # BaseAgent
+│   ├── registry.py        # AgentRegistry
+│   ├── order_agent.py     # Order lifecycle
+│   ├── audit_agent.py     # Audit logging
+│   ├── inventory_agent.py # Low/out-of-stock
+│   ├── payment_agent.py   # Payment events
+│   ├── auth_agent.py      # Auth events
+│   ├── print_agent.py     # Receipt printing
+│   ├── notification_agent.py
+│   ├── reporting_agent.py
+│   ├── insight_agent.py   # LLM upsell/trends/query
+│   ├── orchestrator_agent.py # Voice/chat orchestration
+│   └── llm_client.py      # LLM client (Ollama/OpenAI)
+├── voice/                # Voice pipeline (optional)
+│   ├── stt.py             # Whisper STT
+│   ├── tts.py             # pyttsx3 TTS
+│   └── intent_parser.py   # Intent parsing
+├── api/                  # FastAPI endpoints
+│   └── app.py            # REST API + WebSocket
+└── ui/                   # Flet UI (browser/touch-friendly)
+    └── screens/          # Login, POS, Products, Reports, Chat screens
 
 tests/
 ├── unit/                # Domain & business logic tests
@@ -174,7 +273,7 @@ Read [constitution.md](constitution.md) for complete principles.
 
 ---
 
-## 📝 API Endpoints (Phase 1)
+## 📝 API Endpoints
 
 ### Health Check
 ```bash
@@ -223,7 +322,7 @@ GET /api/reports/inventory-snapshot
 
 ## 🗄️ Database
 
-### SQLite Schema (Phase 1)
+### SQLite Schema
 
 Core tables:
 - `users` - Staff members with roles
@@ -244,17 +343,13 @@ All timestamps in **UTC** (ISO 8601):
 
 ---
 
-## 🔐 Security (Phase 1)
+## 🔐 Security
 
 - **Authentication**: PIN + username (4-6 digits, bcrypt hashed)
 - **Authorization**: Role-based access control (WAITER, CASHIER, MANAGER, CLERK, ADMIN)
 - **Audit**: Every action logged with user, timestamp, before/after state
 - **Data**: Sensitive fields never logged (PIN, full payment details)
-
-**Not included in Phase 1:**
-- HTTPS (add in Phase 2+)
-- 2FA (nice-to-have Phase 2+)
-- Session expiration (add Phase 2+)
+- **Sessions**: 30-minute auto-expiry server-side
 
 ---
 
@@ -326,26 +421,11 @@ open htmlcov/index.html  # View coverage
 
 ## 🚧 Roadmap
 
-### Phase 1 (Current) - MVP
-- ✅ Core POS & Inventory
-- ✅ User roles & audit
-- ✅ Offline operation
-- 🏗️ Flet UI (partially stubbed)
-- 🏗️ Logging infrastructure
-
-### Phase 2 - EnhancementS
-- Voice/STT assistant
-- Stock-in workflow
-- Purchase orders
-- Sync infrastructure
-- Advanced discounts
-
-### Phase 3 - Scale
+All 10 phases complete; v3.0 adds agent-based architecture, voice/chat, and LLM insights. Future enhancements may include:
 - Multi-branch sync
 - Finance/GL module
 - Loyalty program
 - Mobile app
-- Cloud dashboards
 
 ---
 
@@ -378,4 +458,4 @@ Built on principles of:
 
 ---
 
-**Status**: Phase 1 MVP (Foundation) | **Last Updated**: 2026-02-10
+**Status**: Complete v3.0 (Agent-Based Architecture) | **Last Updated**: 2026-02-12

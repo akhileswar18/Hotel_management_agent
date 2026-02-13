@@ -7,7 +7,7 @@ Display and print finalized order receipt.
 import flet as ft
 from datetime import datetime
 from src.ui.components.ui_helpers import (
-    HMSButton, HMSColors, show_error_dialog, show_success_dialog, create_header
+    HMSButton, HMSColors, show_error_dialog, show_success_dialog, show_success_toast, create_header
 )
 
 
@@ -15,7 +15,7 @@ class ReceiptScreen(ft.Column):
     """Receipt display and printing screen."""
 
     def __init__(self, page: ft.Page, order_data: dict, on_continue):
-        self.page = page
+        self._page = page
         self.order_data = order_data
         self.on_continue = on_continue
 
@@ -38,6 +38,31 @@ class ReceiptScreen(ft.Column):
             bgcolor=HMSColors.BG_SECONDARY,
             border_radius=8,
             expand=True,
+        )
+
+        # Digital Receipt link (copyable URL)
+        receipt_number = order_data.get("receipt_number", "")
+        receipt_url = f"http://127.0.0.1:8000/api/receipts/{receipt_number}" if receipt_number else ""
+
+        def _copy_url(e):
+            if receipt_url and hasattr(self._page, "set_clipboard"):
+                self._page.set_clipboard(receipt_url)
+                show_success_toast(self._page, "Link copied to clipboard")
+
+        digital_receipt_section = ft.Container(
+            content=ft.Column([
+                ft.Text("Digital Receipt", size=14, weight="bold", color=HMSColors.TEXT_SECONDARY),
+                ft.Row([
+                    ft.Text(receipt_url or "N/A", size=12, selectable=True, expand=True, no_wrap=False),
+                    ft.IconButton(
+                        icon=ft.icons.COPY,
+                        tooltip="Copy link",
+                        on_click=_copy_url,
+                        data=receipt_url,
+                    ) if receipt_url else ft.Container(),
+                ], spacing=8, vertical_alignment=ft.CrossAxisAlignment.CENTER),
+            ], tight=True, spacing=4),
+            padding=ft.padding.symmetric(vertical=8),
         )
 
         # Action buttons
@@ -64,6 +89,8 @@ class ReceiptScreen(ft.Column):
                 ft.Text("Receipt", size=20, weight="bold"),
                 ft.Divider(),
                 receipt_display,
+                ft.Divider(),
+                digital_receipt_section,
                 ft.Divider(),
                 ft.Row(
                     [
@@ -122,24 +149,58 @@ class ReceiptScreen(ft.Column):
         return "\n".join(lines)
 
     def _handle_print(self, e):
-        """Print receipt."""
-        # TODO: Integrate with actual printer
-        show_success_dialog(
-            self.page,
-            "Print Sent",
-            "Receipt sent to printer (Phase 1 stub)"
-        )
+        """Print receipt to thermal printer or file."""
+        try:
+            from src.infrastructure.printer import ESCPOSPrinter
+            printer = ESCPOSPrinter()
+            filepath = printer.print_receipt(self.order_data)
+            show_success_dialog(
+                self._page,
+                "Receipt Printed",
+                f"Receipt saved to: {filepath}"
+            )
+        except Exception as err:
+            show_error_dialog(self._page, "Print Error", str(err))
 
     def _handle_email(self, e):
-        """Email receipt."""
-        # TODO: Implement email
-        show_error_dialog(
-            self.page,
-            "Coming Soon",
-            "Email receipt feature coming in Phase 2"
+        """Email receipt to customer."""
+        email_field = ft.TextField(
+            label="Customer Email",
+            width=300,
+            keyboard_type=ft.KeyboardType.EMAIL,
+            autofocus=True,
         )
 
+        def _close(ev=None):
+            dlg.open = False
+            self._page.update()
 
-# TODO: Implement actual printing
-# TODO: Implement email sending
-# TODO: Add digital signature option
+        def _send(ev):
+            email = email_field.value.strip()
+            if not email or "@" not in email:
+                show_error_dialog(self._page, "Invalid Email", "Please enter a valid email address.")
+                return
+            _close()
+            try:
+                from src.infrastructure.email_sender import ReceiptEmailSender
+                sender = ReceiptEmailSender()
+                sender.send_receipt(email, self.order_data)
+                show_success_dialog(self._page, "Email Sent", f"Receipt emailed to {email}")
+            except Exception as err:
+                show_error_dialog(self._page, "Email Error", str(err))
+
+        dlg = ft.AlertDialog(
+            title=ft.Text("Email Receipt"),
+            content=ft.Column([
+                ft.Text("Enter the customer's email address:"),
+                email_field,
+            ], tight=True, spacing=10),
+            actions=[
+                ft.TextButton("Cancel", on_click=lambda ev: _close()),
+                ft.ElevatedButton("Send", on_click=_send,
+                    bgcolor=HMSColors.PRIMARY, color=HMSColors.TEXT_LIGHT),
+            ],
+        )
+        self._page.dialog = dlg
+        dlg.open = True
+        self._page.update()

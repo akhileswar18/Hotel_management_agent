@@ -1,3 +1,5 @@
+> **UPDATE (Feb 13, 2026)**: HMS v2.0 is now feature-complete. For the latest quick start, see README.md. Use `python -m src.launcher` for the unified launcher.
+
 # Phase 1.5 Quick Start Guide
 
 ## Get Running in 3 Minutes

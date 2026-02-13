@@ -7,7 +7,8 @@ Manage products: view, add new, update prices, record stock.
 import flet as ft
 import httpx
 from src.ui.components.ui_helpers import (
-    HMSButton, HMSColors, HMSInput, show_error_dialog, show_success_dialog, create_header
+    HMSButton, HMSColors, HMSInput, show_error_dialog, show_success_dialog, create_header,
+    RefreshButton,
 )
 
 
@@ -15,7 +16,7 @@ class ProductsScreen(ft.Column):
     """Product management screen."""
 
     def __init__(self, page: ft.Page, user_info: dict, on_back):
-        self.page = page
+        self._page = page
         self.user_info = user_info
         self.on_back = on_back
         self.api_base = "http://127.0.0.1:8000"
@@ -65,6 +66,13 @@ class ProductsScreen(ft.Column):
 
         self.loading = ft.ProgressRing(visible=False)
 
+        # Refresh button — reloads items while preserving category filter
+        self.refresh_button = RefreshButton(
+            on_refresh=self._refresh_with_filter,
+            page=self._page,
+            tooltip="Refresh products",
+        )
+
         super().__init__(
             [
                 ft.Row(
@@ -72,6 +80,7 @@ class ProductsScreen(ft.Column):
                         ft.Text("Products", size=20, weight="bold"),
                         ft.Container(expand=True),
                         self.category_filter,
+                        self.refresh_button,
                         add_product_button,
                         stock_in_button,
                         back_button,
@@ -88,6 +97,10 @@ class ProductsScreen(ft.Column):
 
         # Load items
         self._load_items()
+
+    def _refresh_with_filter(self):
+        """Refresh items while preserving the current category filter."""
+        self._load_items(category=self.category_filter.value)
 
     def _handle_category_filter(self, e):
         """Filter items by category."""
@@ -212,7 +225,7 @@ class ProductsScreen(ft.Column):
             if not name or not price_str:
                 error_text.value = "Name and price are required"
                 error_text.visible = True
-                self.page.update()
+                self._page.update()
                 return
             try:
                 price = float(price_str)
@@ -221,11 +234,11 @@ class ProductsScreen(ft.Column):
             except ValueError:
                 error_text.value = "Enter valid numbers"
                 error_text.visible = True
-                self.page.update()
+                self._page.update()
                 return
 
             dlg.open = False
-            self.page.update()
+            self._page.update()
 
             try:
                 with httpx.Client(timeout=5.0) as client:
@@ -281,11 +294,11 @@ class ProductsScreen(ft.Column):
 
         def _close(d):
             d.open = False
-            self.page.update()
+            self._page.update()
 
-        self.page.dialog = dlg
+        self._page.dialog = dlg
         dlg.open = True
-        self.page.update()
+        self._page.update()
 
     def _handle_edit_product(self, item_id: str):
         """Open Edit Product dialog to update price and reorder level."""
@@ -323,7 +336,7 @@ class ProductsScreen(ft.Column):
                 except ValueError:
                     error_text.value = "Enter a valid price"
                     error_text.visible = True
-                    self.page.update()
+                    self._page.update()
                     return
             if reorder_str:
                 try:
@@ -331,11 +344,11 @@ class ProductsScreen(ft.Column):
                 except ValueError:
                     error_text.value = "Enter a valid reorder level"
                     error_text.visible = True
-                    self.page.update()
+                    self._page.update()
                     return
 
             dlg.open = False
-            self.page.update()
+            self._page.update()
 
             try:
                 with httpx.Client(timeout=5.0) as client:
@@ -371,11 +384,11 @@ class ProductsScreen(ft.Column):
 
         def _close(d):
             d.open = False
-            self.page.update()
+            self._page.update()
 
-        self.page.dialog = dlg
+        self._page.dialog = dlg
         dlg.open = True
-        self.page.update()
+        self._page.update()
 
     def _handle_archive_product(self, item_id: str):
         """Archive (soft delete) a product."""
@@ -385,7 +398,7 @@ class ProductsScreen(ft.Column):
 
         def confirm_archive(e):
             dlg.open = False
-            self.page.update()
+            self._page.update()
             try:
                 with httpx.Client(timeout=5.0) as client:
                     resp = client.patch(
@@ -413,11 +426,11 @@ class ProductsScreen(ft.Column):
 
         def _close(d):
             d.open = False
-            self.page.update()
+            self._page.update()
 
-        self.page.dialog = dlg
+        self._page.dialog = dlg
         dlg.open = True
-        self.page.update()
+        self._page.update()
 
     def _handle_stock_in(self, e):
         """Record stock-in dialog with item picker."""
@@ -446,7 +459,7 @@ class ProductsScreen(ft.Column):
             if not item_dropdown.value or not qty_str:
                 error_text.value = "Select a product and enter quantity"
                 error_text.visible = True
-                self.page.update()
+                self._page.update()
                 return
             try:
                 qty = int(qty_str)
@@ -455,11 +468,11 @@ class ProductsScreen(ft.Column):
             except ValueError:
                 error_text.value = "Enter a positive whole number"
                 error_text.visible = True
-                self.page.update()
+                self._page.update()
                 return
 
             dlg.open = False
-            self.page.update()
+            self._page.update()
 
             try:
                 with httpx.Client(timeout=5.0) as client:
@@ -499,8 +512,8 @@ class ProductsScreen(ft.Column):
 
         def _close(d):
             d.open = False
-            self.page.update()
+            self._page.update()
 
-        self.page.dialog = dlg
+        self._page.dialog = dlg
         dlg.open = True
-        self.page.update()
+        self._page.update()

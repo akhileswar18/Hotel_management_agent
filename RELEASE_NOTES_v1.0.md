@@ -1,3 +1,77 @@
+# Release Notes — HMS v2.0.0
+
+**Release Date**: February 13, 2026
+**Status**: Feature-complete
+**Platform**: Windows 10/11 (primary), Linux/macOS (Docker)
+
+---
+
+## What's New in v2.0
+
+### Phase 6: Auth & Session Management
+- Server-side session store with 30-minute inactivity timeout
+- Session validation on API calls with auto-refresh
+- User management screen (create, edit roles, reset PINs) — manager only
+- User CRUD API endpoints (GET/POST/PATCH /api/users)
+- "Users" tab in nav rail visible only to managers/admins
+
+### Phase 7: UI Polish & Accessibility
+- Dark mode toggle (moon/sun icon in nav rail)
+- Keyboard shortcuts: F2=New Order, F5=Finalize, F8=Hold, F9=Resume, Esc=Void
+- Toast/snackbar notification system (non-blocking feedback)
+- Global error banner overlay with dismiss button
+- WCAG AAA color contrast (all colors upgraded to 7:1+ ratio)
+
+### Phase 8: Receipt & Printing
+- ESC/POS thermal printer driver (src/infrastructure/printer.py)
+- Print receipt dialog after order finalization
+- Text file receipt backup in receipts/ folder
+- Email receipt via SMTP (HTML + plain text, src/infrastructure/email_sender.py)
+- Email dialog on receipt screen with address input
+- Reprint button on finalized orders in Order History
+- Digital receipt URL with copy-to-clipboard
+- Receipt API endpoint: GET /api/receipts/{receipt_number}
+
+### Phase 9: Data & Performance
+- Database backup/restore (Database.backup(), Database.restore())
+- Backup CLI: python scripts/backup.py [backup|restore|list|vacuum]
+- Expanded seed data: 24 menu items, sample orders (finalized, held, voided)
+- Performance benchmarks: order creation, finalization, stock query, report gen
+- DB vacuum for space reclamation
+
+### Phase 10: Polish & Cross-Cutting
+- Updated all documentation to reflect full completion
+- Cleaned up TODO comments and Phase 1/2 stubs
+- i18n framework with English + Hindi translations (src/ui/i18n.py)
+- Security hardening: rate limiting (100 req/min), security headers, input validation
+- Full regression: 73 tests passing (70+ unit/integration/smoke/performance)
+
+### Bug Fixes
+- Fixed stock validation: prevents adding more items than available stock
+- Fixed NavigationRail "height is unbounded" error
+- Fixed self.page property conflict in ft.Column subclasses (use self._page)
+- Fixed ft.Icons capitalization (must be ft.icons in Flet 0.80.x)
+- Fixed POS screen duplication on login
+
+---
+
+## Upgrade from v1.0
+
+No database migration needed — v2.0 uses the same schema with one additional migration (002_add_is_active.sql) that runs automatically.
+
+```bash
+# Update code
+git pull origin main
+
+# Install any new dependencies
+pip install -r requirements.txt
+
+# Run (migrations apply automatically)
+python -m src.launcher
+```
+
+---
+
 # Release Notes — HMS v1.0.0
 
 **Release Date**: February 11, 2026

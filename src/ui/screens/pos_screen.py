@@ -11,7 +11,8 @@ from uuid import uuid4
 from datetime import datetime
 from src.ui.components.ui_helpers import (
     HMSButton, ItemPickerWidget, OrderSummaryWidget, HMSColors,
-    show_error_dialog, show_success_dialog, create_header
+    show_error_dialog, show_success_dialog, show_success_toast, create_header,
+    RefreshButton,
 )
 
 
@@ -19,7 +20,7 @@ class POSScreen(ft.Column):
     """Main POS screen for order entry and payment."""
 
     def __init__(self, page: ft.Page, user_info: dict, on_logout):
-        self.page = page
+        self._page = page
         self.user_info = user_info
         self.on_logout = on_logout
         self.api_base = "http://127.0.0.1:8000"
@@ -52,7 +53,7 @@ class POSScreen(ft.Column):
 
         # Buttons
         self.new_order_button = HMSButton(
-            "New Order",
+            "New Order (F2)",
             self._handle_new_order,
             width=150,
             color=HMSColors.PRIMARY,
@@ -66,7 +67,7 @@ class POSScreen(ft.Column):
         )
 
         self.finalize_button = HMSButton(
-            "Finalize & Pay",
+            "Finalize (F5)",
             self._handle_finalize,
             width=150,
             color=HMSColors.SUCCESS,
@@ -80,14 +81,14 @@ class POSScreen(ft.Column):
         )
 
         self.hold_button = HMSButton(
-            "Hold Order",
+            "Hold (F8)",
             self._handle_hold,
             width=130,
             color=HMSColors.WARNING,
         )
 
         self.resume_button = HMSButton(
-            "Resume Held",
+            "Resume (F9)",
             self._handle_resume_held,
             width=130,
             color=HMSColors.PRIMARY,
@@ -97,6 +98,12 @@ class POSScreen(ft.Column):
             "Logout",
             self._handle_logout,
             width=150,
+        )
+
+        self.voice_button = ft.IconButton(
+            icon=ft.icons.MIC,
+            tooltip="Voice order (coming soon)",
+            on_click=self._handle_voice_click,
         )
 
         # Disable until order created
@@ -113,6 +120,13 @@ class POSScreen(ft.Column):
 
         self.loading = ft.ProgressRing(visible=False)
 
+        # Refresh button — reloads item grid without losing draft order
+        self.refresh_button = RefreshButton(
+            on_refresh=self._load_items,
+            page=self._page,
+            tooltip="Refresh menu items",
+        )
+
         super().__init__(
             [
                 ft.Row(
@@ -121,6 +135,7 @@ class POSScreen(ft.Column):
                         self.table_id_field,
                         self.new_order_button,
                         ft.Container(expand=True),
+                        self.refresh_button,
                         self.logout_button,
                     ],
                     spacing=10,
@@ -143,6 +158,7 @@ class POSScreen(ft.Column):
                         self.hold_button,
                         self.resume_button,
                         self.void_button,
+                        self.voice_button,
                         ft.Container(expand=True),
                         self.loading,
                     ],
@@ -156,6 +172,31 @@ class POSScreen(ft.Column):
 
         # Load items on init
         self._load_items()
+
+        # Register keyboard shortcuts
+        self._page.on_keyboard_event = self._handle_keyboard
+
+    def _handle_keyboard(self, e: ft.KeyboardEvent):
+        """Handle keyboard shortcuts.
+
+        F2 = New Order
+        F5 = Finalize & Pay
+        F8 = Hold Order
+        F9 = Resume Held
+        Escape = Void Order (if visible)
+        """
+        key = e.key
+
+        if key == "F2":
+            self._handle_new_order(None)
+        elif key == "F5" and not self.finalize_button.disabled:
+            self._handle_finalize(None)
+        elif key == "F8" and not self.hold_button.disabled:
+            self._handle_hold(None)
+        elif key == "F9":
+            self._handle_resume_held(None)
+        elif key == "Escape" and self.void_button.visible and not self.void_button.disabled:
+            self._handle_void(None)
 
     def _load_items(self):
         """Load items from API."""
@@ -191,7 +232,7 @@ class POSScreen(ft.Column):
                     self.finalize_button.disabled = False
                     self.void_button.disabled = False
                     self.hold_button.disabled = False
-                    self.page.update()
+                    self._page.update()
                     show_success_dialog(self.page, "Success", f"Order created for table {table_id}")
                 else:
                     show_error_dialog(self.page, "Error", "Failed to create order")
@@ -213,7 +254,7 @@ class POSScreen(ft.Column):
                 if response.status_code == 200:
                     self.current_order = response.json()
                     self._update_order_display()
-                    self.page.update()
+                    self._page.update()
                 else:
                     show_error_dialog(self.page, "Error", "Failed to add item")
         except Exception as ex:
@@ -258,7 +299,7 @@ class POSScreen(ft.Column):
                 return
 
             dlg.open = False
-            self.page.update()
+            self._page.update()
 
             try:
                 with httpx.Client(timeout=5.0) as client:
@@ -273,7 +314,7 @@ class POSScreen(ft.Column):
                     if response.status_code == 200:
                         self.current_order = response.json()
                         self._update_order_display()
-                        self.page.update()
+                        self._page.update()
                         show_success_dialog(self.page, "Discount Applied",
                             f"Discount of {amount}{'%' if discount_type.value == 'percentage' else ' ₹'} applied")
                     else:
@@ -299,11 +340,11 @@ class POSScreen(ft.Column):
 
         def _close(d):
             d.open = False
-            self.page.update()
+            self._page.update()
 
-        self.page.dialog = dlg
+        self._page.dialog = dlg
         dlg.open = True
-        self.page.update()
+        self._page.update()
 
     def _handle_finalize(self, e):
         """Finalize order and open payment dialog."""
@@ -329,9 +370,10 @@ class POSScreen(ft.Column):
         )
 
         def confirm_payment(e):
+            nonlocal dlg
             dlg.open = False
             self.loading.visible = True
-            self.page.update()
+            self._page.update()
 
             try:
                 with httpx.Client(timeout=5.0) as client:
@@ -344,22 +386,45 @@ class POSScreen(ft.Column):
                         },
                     )
                     if response.status_code == 200:
-                        finalized_order = response.json()
-                        show_success_dialog(
-                            self.page,
-                            "Payment Successful",
-                            f"Receipt: {finalized_order.get('receipt_number', 'N/A')}\n"
-                            f"Total: {finalized_order['total_amount']:.2f}"
-                        )
+                        data = response.json()
                         self.current_order = None
                         self._update_order_display()
+                        # Show receipt dialog with print option
+                        from src.infrastructure.printer import ESCPOSPrinter
+
+                        def _print_and_continue(ev):
+                            receipt_dlg.open = False
+                            self._page.update()
+                            try:
+                                printer = ESCPOSPrinter()
+                                filepath = printer.print_receipt(data)
+                                show_success_toast(self._page, f"Receipt saved: {filepath}")
+                            except Exception as err:
+                                show_error_dialog(self._page, "Print Error", str(err))
+
+                        def _skip_print(ev):
+                            receipt_dlg.open = False
+                            self._page.update()
+
+                        receipt_dlg = ft.AlertDialog(
+                            title=ft.Text("Order Finalized!", color=HMSColors.SUCCESS),
+                            content=ft.Text(f"Total: Rs.{data.get('total_amount', 0):.2f}\nReceipt #{data.get('receipt_number', '')}"),
+                            actions=[
+                                ft.ElevatedButton("Print Receipt", on_click=_print_and_continue,
+                                    bgcolor=HMSColors.PRIMARY, color=HMSColors.TEXT_LIGHT),
+                                ft.TextButton("Skip", on_click=_skip_print),
+                            ],
+                        )
+                        self._page.dialog = receipt_dlg
+                        receipt_dlg.open = True
+                        self._page.update()
                     else:
                         show_error_dialog(self.page, "Error", "Payment failed")
             except Exception as err:
                 show_error_dialog(self.page, "Error", str(err))
             finally:
                 self.loading.visible = False
-                self.page.update()
+                self._page.update()
 
         dlg = ft.AlertDialog(
             title=ft.Text("Finalize Order & Payment"),
@@ -380,11 +445,11 @@ class POSScreen(ft.Column):
 
         def close_dialog(d):
             d.open = False
-            self.page.update()
+            self._page.update()
 
-        self.page.dialog = dlg
+        self._page.dialog = dlg
         dlg.open = True
-        self.page.update()
+        self._page.update()
 
     def _handle_void(self, e):
         """Void current order via API with confirmation."""
@@ -404,7 +469,7 @@ class POSScreen(ft.Column):
         def confirm_void(e):
             reason = reason_field.value.strip() or "No reason provided"
             dlg.open = False
-            self.page.update()
+            self._page.update()
 
             try:
                 with httpx.Client(timeout=5.0) as client:
@@ -423,7 +488,7 @@ class POSScreen(ft.Column):
                         self.finalize_button.disabled = True
                         self.void_button.disabled = True
                         self._update_order_display()
-                        self.page.update()
+                        self._page.update()
                     else:
                         detail = response.json().get("detail", "Failed to void order")
                         show_error_dialog(self.page, "Error", detail)
@@ -449,11 +514,11 @@ class POSScreen(ft.Column):
 
         def _close(d):
             d.open = False
-            self.page.update()
+            self._page.update()
 
-        self.page.dialog = dlg
+        self._page.dialog = dlg
         dlg.open = True
-        self.page.update()
+        self._page.update()
 
     def _handle_hold(self, e):
         """Put current order on hold."""
@@ -473,7 +538,7 @@ class POSScreen(ft.Column):
                     self.void_button.disabled = True
                     self.hold_button.disabled = True
                     self._update_order_display()
-                    self.page.update()
+                    self._page.update()
                 else:
                     detail = response.json().get("detail", "Failed to hold order")
                     show_error_dialog(self.page, "Error", detail)
@@ -514,7 +579,7 @@ class POSScreen(ft.Column):
 
         def confirm_resume(ev):
             dlg.open = False
-            self.page.update()
+            self._page.update()
             if not order_dropdown.value:
                 return
             try:
@@ -530,7 +595,7 @@ class POSScreen(ft.Column):
                         self.finalize_button.disabled = False
                         self.void_button.disabled = False
                         self.hold_button.disabled = False
-                        self.page.update()
+                        self._page.update()
                         show_success_dialog(self.page, "Order Resumed",
                             f"Order for table {self.current_order.get('table_id', '?')} resumed.")
                     else:
@@ -551,11 +616,11 @@ class POSScreen(ft.Column):
 
         def _close(d):
             d.open = False
-            self.page.update()
+            self._page.update()
 
-        self.page.dialog = dlg
+        self._page.dialog = dlg
         dlg.open = True
-        self.page.update()
+        self._page.update()
 
     def _handle_edit_qty(self, line_item_id: str, current_qty: int):
         """Open dialog to edit a line item's quantity."""
@@ -568,7 +633,7 @@ class POSScreen(ft.Column):
 
         def confirm_edit(ev):
             dlg.open = False
-            self.page.update()
+            self._page.update()
             try:
                 new_qty = int(qty_field.value.strip())
                 if new_qty <= 0:
@@ -587,7 +652,7 @@ class POSScreen(ft.Column):
                     if response.status_code == 200:
                         self.current_order = response.json()
                         self._update_order_display()
-                        self.page.update()
+                        self._page.update()
                     else:
                         detail = response.json().get("detail", "Failed to update quantity")
                         show_error_dialog(self.page, "Error", detail)
@@ -606,11 +671,160 @@ class POSScreen(ft.Column):
 
         def _close(d):
             d.open = False
-            self.page.update()
+            self._page.update()
 
-        self.page.dialog = dlg
+        self._page.dialog = dlg
         dlg.open = True
-        self.page.update()
+        self._page.update()
+
+    def _handle_voice_click(self, e):
+        """Open quick command dialog for text-based ordering with follow-up support."""
+        # Track pending intent for multi-turn follow-ups
+        self._pos_pending_intent = None
+
+        command_field = ft.TextField(
+            label="Quick Command",
+            hint_text="e.g. '2 biryani and 1 coke for table 3'",
+            width=400,
+            autofocus=True,
+            on_submit=lambda ev: _execute_command(ev),
+        )
+
+        self._voice_status = ft.Text("", size=12, color=HMSColors.TEXT_SECONDARY)
+        self._voice_result = ft.Column([], spacing=4)
+
+        def _close(d):
+            d.open = False
+            self._pos_pending_intent = None
+            self._page.update()
+
+        def _execute_command(ev):
+            text = command_field.value.strip()
+            if not text:
+                return
+
+            # Allow cancel
+            if text.lower() in ("cancel", "nevermind", "stop", "reset"):
+                self._pos_pending_intent = None
+                self._voice_status.value = "Cancelled. Type a new command."
+                self._voice_status.color = HMSColors.TEXT_SECONDARY
+                command_field.value = ""
+                command_field.hint_text = "e.g. '2 biryani and 1 coke for table 3'"
+                try:
+                    self._page.update()
+                except Exception:
+                    pass
+                return
+
+            self._voice_status.value = "Processing..."
+            self._voice_status.color = HMSColors.PRIMARY
+            try:
+                self._page.update()
+            except Exception:
+                pass
+
+            try:
+                payload = {"text": text, "user_id": self.user_info.get("user_id", "")}
+                if self._pos_pending_intent:
+                    payload["pending_intent"] = self._pos_pending_intent
+
+                with httpx.Client(timeout=15.0) as client:
+                    response = client.post(
+                        f"{self.api_base}/api/voice/text-command",
+                        json=payload,
+                    )
+                    if response.status_code == 200:
+                        data = response.json()
+                        intent = data.get("intent", {})
+                        status = data.get("status", "")
+                        message = data.get("message", "")
+
+                        if status == "followup":
+                            # Store pending intent and show the follow-up question
+                            self._pos_pending_intent = intent
+                            action_label = intent.get("action", "").replace("_", " ").title()
+                            self._voice_status.value = f"[{action_label}] {message}"
+                            self._voice_status.color = HMSColors.PRIMARY
+                            self._voice_result.controls = [
+                                ft.Text("Answer above, or type 'cancel' to abort.", size=11, color=HMSColors.TEXT_SECONDARY),
+                            ]
+                            command_field.hint_text = "Answer the question..."
+
+                        elif status == "success":
+                            self._pos_pending_intent = None
+                            self._voice_status.value = message
+                            self._voice_status.color = HMSColors.SUCCESS
+                            command_field.hint_text = "e.g. '2 biryani and 1 coke for table 3'"
+
+                            # If order was created, update the POS display
+                            result = data.get("result", {})
+                            order_id = result.get("order_id", "")
+                            if order_id:
+                                try:
+                                    order_resp = client.get(f"{self.api_base}/api/sales/orders/{order_id}")
+                                    if order_resp.status_code == 200:
+                                        self.current_order = order_resp.json()
+                                        self._update_order_display()
+                                        self.discount_button.disabled = False
+                                        self.finalize_button.disabled = False
+                                        self.void_button.disabled = False
+                                        self.hold_button.disabled = False
+                                except Exception:
+                                    pass
+
+                            self._voice_result.controls = [
+                                ft.Text(message, size=13, color=HMSColors.SUCCESS),
+                            ]
+
+                        elif status == "error":
+                            self._pos_pending_intent = None
+                            self._voice_status.value = message or "Command failed"
+                            self._voice_status.color = HMSColors.ERROR
+                            command_field.hint_text = "e.g. '2 biryani and 1 coke for table 3'"
+
+                        else:
+                            # info or unknown
+                            self._pos_pending_intent = None
+                            self._voice_status.value = message
+                            self._voice_status.color = HMSColors.PRIMARY
+                            command_field.hint_text = "e.g. '2 biryani and 1 coke for table 3'"
+                    else:
+                        detail = response.json().get("detail", "Command failed")
+                        self._voice_status.value = f"Error: {detail}"
+                        self._voice_status.color = HMSColors.ERROR
+            except Exception as err:
+                self._voice_status.value = f"Connection error: {str(err)[:50]}"
+                self._voice_status.color = HMSColors.ERROR
+
+            command_field.value = ""
+            try:
+                self._page.update()
+            except Exception:
+                pass
+
+        cmd_dlg = ft.AlertDialog(
+            title=ft.Text("Quick Command"),
+            content=ft.Column([
+                ft.Text("Type a command (orders, inventory, payments, etc.):", size=13, color=HMSColors.TEXT_SECONDARY),
+                command_field,
+                ft.Divider(),
+                self._voice_status,
+                self._voice_result,
+                ft.Divider(),
+                ft.Text("Examples:", size=12, weight="bold"),
+                ft.Text("• '2 biryani and 1 lassi for table 5'", size=11, color=HMSColors.TEXT_SECONDARY),
+                ft.Text("• '3 coke for table 2, pay cash'", size=11, color=HMSColors.TEXT_SECONDARY),
+            ], tight=True, spacing=8, width=420),
+            actions=[
+                ft.TextButton("Close", on_click=lambda ev: _close(cmd_dlg)),
+                ft.ElevatedButton("Execute", on_click=_execute_command,
+                    bgcolor=HMSColors.PRIMARY, color=HMSColors.TEXT_LIGHT),
+            ],
+        )
+
+        self._page.dialog = cmd_dlg
+        cmd_dlg.open = True
+        self._page.update()
 
     def _handle_logout(self, e):
         """Logout and return to auth screen."""
@@ -631,7 +845,7 @@ class POSScreen(ft.Column):
                 if response.status_code == 200:
                     self.current_order = response.json()
                     self._update_order_display()
-                    self.page.update()
+                    self._page.update()
                 else:
                     detail = response.json().get("detail", "Failed to remove item")
                     show_error_dialog(self.page, "Error", detail)
@@ -699,7 +913,4 @@ class POSScreen(ft.Column):
             )
 
 
-# TODO: Add void with manager approval
-# TODO: Add hold/resume order
-# TODO: Add receipt printing
-# TODO: Add voice integration (Phase 2)
+# TODO: Add voice/STT integration (future)
