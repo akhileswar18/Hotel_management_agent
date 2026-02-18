@@ -194,16 +194,16 @@ class OrderHistoryScreen(ft.Column):
                 # Color coding by status
                 if status == "finalized":
                     status_color = HMSColors.SUCCESS
-                    status_icon = ft.icons.CHECK_CIRCLE
+                    status_icon = ft.Icons.CHECK_CIRCLE
                 elif status == "voided":
                     status_color = HMSColors.ERROR
-                    status_icon = ft.icons.CANCEL
+                    status_icon = ft.Icons.CANCEL
                 elif status == "held":
                     status_color = HMSColors.WARNING
-                    status_icon = ft.icons.PAUSE_CIRCLE
+                    status_icon = ft.Icons.PAUSE_CIRCLE
                 else:
                     status_color = HMSColors.PRIMARY
-                    status_icon = ft.icons.EDIT
+                    status_icon = ft.Icons.EDIT
 
                 line_items = order.get("line_items", [])
                 items_str = ", ".join(

@@ -23,6 +23,9 @@ class Event:
     payload: Dict[str, Any]  # Event-specific data
     user_id: Optional[str] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
+    reply_to: Optional[str] = None        # Event ID this is a reply to
+    parent_event_id: Optional[str] = None  # Event ID that caused this event
+    target_agent: Optional[str] = None     # Direct agent addressing (None = broadcast)
 
     @staticmethod
     def create(
@@ -32,6 +35,9 @@ class Event:
         user_id: Optional[str] = None,
         correlation_id: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
+        reply_to: Optional[str] = None,
+        parent_event_id: Optional[str] = None,
+        target_agent: Optional[str] = None,
     ) -> "Event":
         """Factory method to create a new Event with auto-generated id and timestamp."""
         return Event(
@@ -43,6 +49,9 @@ class Event:
             payload=payload,
             user_id=user_id,
             metadata=metadata or {},
+            reply_to=reply_to,
+            parent_event_id=parent_event_id,
+            target_agent=target_agent,
         )
 
     def to_dict(self) -> dict:
@@ -65,6 +74,9 @@ class Event:
             payload=data.get("payload", {}),
             user_id=data.get("user_id"),
             metadata=data.get("metadata", {}),
+            reply_to=data.get("reply_to"),
+            parent_event_id=data.get("parent_event_id"),
+            target_agent=data.get("target_agent"),
         )
 
     @staticmethod
@@ -77,6 +89,7 @@ class Event:
 class EventResult:
     """Result of publishing an event (used for request-reply pattern)."""
     success: bool
-    event: Optional[Event] = None    # Response event
+    event: Optional[Event] = None    # Primary response event (first non-None)
     error: Optional[str] = None      # Error message if failed
     elapsed_ms: float = 0.0          # Processing time in milliseconds
+    all_responses: list = field(default_factory=list)  # All handler responses

@@ -36,12 +36,12 @@ class ReportsScreen(ft.Column):
         )
 
         prev_day_btn = ft.IconButton(
-            icon=ft.icons.CHEVRON_LEFT,
+            icon=ft.Icons.CHEVRON_LEFT,
             tooltip="Previous day",
             on_click=self._handle_prev_day,
         )
         next_day_btn = ft.IconButton(
-            icon=ft.icons.CHEVRON_RIGHT,
+            icon=ft.Icons.CHEVRON_RIGHT,
             tooltip="Next day",
             on_click=self._handle_next_day,
         )
@@ -358,7 +358,7 @@ class ReportsScreen(ft.Column):
             low_stock_widgets.append(
                 ft.Container(
                     content=ft.Row([
-                        ft.Icon(ft.icons.WARNING_AMBER_ROUNDED, color=HMSColors.WARNING, size=18),
+                        ft.Icon(ft.Icons.WARNING_AMBER_ROUNDED, color=HMSColors.WARNING, size=18),
                         ft.Text(item.get("name", "Unknown"), size=13, weight="bold"),
                         ft.Container(expand=True),
                         ft.Text(f"Stock: {stock}", size=13, color=HMSColors.ERROR if stock <= 0 else HMSColors.WARNING),

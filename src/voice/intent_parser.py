@@ -1,12 +1,19 @@
 """
 Intent Parser — Parse natural language into structured intents for OrchestratorAgent.
 
-Rule-based first, with optional LLM fallback for ambiguous input.
+Two-tier parsing strategy:
+1. LLM-first (if configured): Uses Groq/OpenAI/Ollama to understand natural language
+2. Rule-based fallback: Keyword matching when LLM is unavailable
+
 Supports follow-up detection for conversational command flows.
 """
 
+import json
+import logging
 import re
 from typing import Dict, Any, List, Optional
+
+logger = logging.getLogger("hms.intent_parser")
 
 
 # Required fields per action — if missing, follow-up questions are needed
@@ -35,18 +42,170 @@ FOLLOW_UP_PROMPTS = {
 
 
 class IntentParser:
-    """Parse natural language into structured intents for the OrchestratorAgent."""
+    """Parse natural language into structured intents for the OrchestratorAgent.
 
-    def __init__(self, item_repo=None):
+    Uses LLM when available; falls back to rule-based parsing.
+    """
+
+    # LLM system prompt for command parsing (returns structured JSON)
+    LLM_COMMAND_SYSTEM_PROMPT = """You are an intent parser for a hotel/restaurant management system.
+Parse the user's natural language command into a structured JSON intent.
+
+You MUST return ONLY valid JSON (no markdown, no explanation, no code fences).
+
+Available actions and their required fields:
+- create_order: table_id (string), items (array of {item_id, name, quantity}), payment_method (optional: CASH/CARD/VOUCHER)
+- add_item: items (array of {item_id, name, quantity})
+- finalize_order: payment_method (CASH/CARD/VOUCHER)
+- void_order: reason (optional string)
+- hold_order: (no extra fields)
+- create_product: name (string), price (number), category (food/beverage/dessert/other)
+- stock_in: item_name (string), quantity (number)
+- report: type (daily_sales)
+
+For items, use the item names as provided. Set item_id to empty string "" if unknown.
+If the user mentions both items AND payment, set action to "create_order" with payment_method included.
+If the user only says "pay cash" or "finalize", set action to "finalize_order".
+
+Examples:
+Input: "order 3 biryani and 2 coke for table 5 pay cash"
+Output: {"action": "create_order", "table_id": "5", "items": [{"item_id": "", "name": "biryani", "quantity": 3}, {"item_id": "", "name": "coke", "quantity": 2}], "payment_method": "CASH"}
+
+Input: "finalize order, pay by card"
+Output: {"action": "finalize_order", "payment_method": "CARD"}
+
+Input: "add 50 units of biryani to stock"
+Output: {"action": "stock_in", "item_name": "biryani", "quantity": 50}
+
+Input: "what are today's sales?"
+Output: {"action": "report", "type": "daily_sales"}
+
+Input: "new product paneer tikka at 350 food"
+Output: {"action": "create_product", "name": "Paneer Tikka", "price": 350, "category": "food"}
+
+Input: "void the current order"
+Output: {"action": "void_order", "reason": "Customer request"}
+
+Return ONLY the JSON object. No other text."""
+
+    def __init__(self, item_repo=None, llm_client=None):
         from src.infrastructure import ItemRepository
         self.item_repo = item_repo or ItemRepository()
+        self._llm = llm_client  # Lazy-loaded if None
+        self._llm_loaded = llm_client is not None
+
+    @property
+    def llm(self):
+        """Lazy-load LLM client."""
+        if not self._llm_loaded:
+            self._llm_loaded = True
+            try:
+                from src.agents.llm_client import LLMClient
+                client = LLMClient()
+                if client.is_available:
+                    self._llm = client
+                    logger.info(f"IntentParser: LLM enabled ({client.provider}/{client.model})")
+                else:
+                    logger.info("IntentParser: LLM not available (no API key), using rule-based only")
+            except Exception as e:
+                logger.debug(f"IntentParser: Could not load LLM client: {e}")
+        return self._llm
 
     def parse(self, text: str) -> Dict[str, Any]:
-        """Parse text into an intent dict.
+        """Parse text into an intent dict using LLM (if available) with rule-based fallback.
 
         Returns:
             e.g. {"action": "create_order", "table_id": "5", "items": [...]}
         """
+        # Try LLM first
+        if self.llm:
+            llm_result = self._parse_with_llm(text)
+            if llm_result and llm_result.get("action") != "unknown":
+                llm_result["_parsed_by"] = "llm"
+                # Enrich item_ids from inventory if LLM returned item names
+                self._enrich_item_ids(llm_result)
+                return llm_result
+
+        # Fall back to rule-based parsing
+        result = self._parse_rule_based(text)
+        result["_parsed_by"] = "rules"
+        return result
+
+    def _parse_with_llm(self, text: str) -> Optional[Dict[str, Any]]:
+        """Use LLM to parse natural language into a structured intent."""
+        try:
+            # Build the prompt with available item catalog for context
+            catalog_hint = self._get_catalog_hint()
+            prompt = text
+            if catalog_hint:
+                prompt = f"Available menu items: {catalog_hint}\n\nUser command: {text}"
+
+            raw = self.llm.query(prompt, system_prompt=self.LLM_COMMAND_SYSTEM_PROMPT)
+            if not raw:
+                logger.debug("LLM returned empty response for intent parsing")
+                return None
+
+            # Parse JSON from LLM response (handle markdown code fences)
+            cleaned = raw.strip()
+            if cleaned.startswith("```"):
+                # Strip markdown code fences
+                lines = cleaned.split("\n")
+                cleaned = "\n".join(
+                    line for line in lines
+                    if not line.strip().startswith("```")
+                )
+
+            parsed = json.loads(cleaned)
+            if isinstance(parsed, dict) and "action" in parsed:
+                logger.info(f"LLM parsed intent: action={parsed.get('action')}")
+                return parsed
+            logger.debug(f"LLM returned invalid intent structure: {parsed}")
+            return None
+        except json.JSONDecodeError as e:
+            logger.debug(f"LLM returned non-JSON: {e}")
+            return None
+        except Exception as e:
+            logger.debug(f"LLM intent parsing failed: {e}")
+            return None
+
+    def _get_catalog_hint(self) -> str:
+        """Get a compact list of available items for LLM context."""
+        try:
+            items = self.item_repo.list()
+            if not items:
+                return ""
+            return ", ".join(item.name for item in items[:30])
+        except Exception:
+            return ""
+
+    def _enrich_item_ids(self, intent: Dict[str, Any]):
+        """Fill in item_ids from inventory for items matched by name."""
+        items = intent.get("items", [])
+        if not items:
+            return
+
+        try:
+            all_items = self.item_repo.list()
+            name_to_id = {item.name.lower(): str(item.id) for item in all_items}
+        except Exception:
+            return
+
+        for item in items:
+            if not item.get("item_id") or item["item_id"] == "":
+                name_lower = (item.get("name") or "").lower()
+                # Exact match
+                if name_lower in name_to_id:
+                    item["item_id"] = name_to_id[name_lower]
+                else:
+                    # Partial match
+                    for inv_name, inv_id in name_to_id.items():
+                        if name_lower in inv_name or inv_name in name_lower:
+                            item["item_id"] = inv_id
+                            item["name"] = inv_name.title()
+                            break
+
+    def _parse_rule_based(self, text: str) -> Dict[str, Any]:
+        """Rule-based intent parsing (original keyword-matching approach)."""
         text_lower = text.lower().strip()
 
         # ── Specific compound phrases checked FIRST (before item-name matching) ──
@@ -110,6 +269,9 @@ class IntentParser:
     def parse_followup(self, pending_intent: Dict[str, Any], text: str) -> Dict[str, Any]:
         """Merge a follow-up answer into a pending (incomplete) intent.
 
+        Uses LLM if available to understand the follow-up in context,
+        then falls back to rule-based extraction.
+
         Args:
             pending_intent: The incomplete intent from a previous parse
             text: The user's follow-up answer
@@ -117,6 +279,14 @@ class IntentParser:
         Returns:
             Updated intent with the missing fields filled in
         """
+        # Try LLM for follow-up understanding
+        if self.llm:
+            llm_result = self._followup_with_llm(pending_intent, text)
+            if llm_result:
+                self._enrich_item_ids(llm_result)
+                llm_result["_parsed_by"] = "llm"
+                return llm_result
+
         action = pending_intent.get("action", "")
         text_lower = text.lower().strip()
         missing = self.get_missing_fields(pending_intent)
@@ -170,6 +340,38 @@ class IntentParser:
             pending_intent["reason"] = text.strip()
 
         return pending_intent
+
+    def _followup_with_llm(self, pending_intent: Dict[str, Any], text: str) -> Optional[Dict[str, Any]]:
+        """Use LLM to merge follow-up answer into the pending intent."""
+        try:
+            missing = self.get_missing_fields(pending_intent)
+            if not missing:
+                return pending_intent
+
+            prompt = (
+                f"Previous incomplete command: {json.dumps(pending_intent)}\n"
+                f"Missing fields: {missing}\n"
+                f"User's follow-up answer: {text}\n\n"
+                f"Merge the follow-up answer into the command and return the complete JSON intent. "
+                f"Return ONLY valid JSON."
+            )
+            raw = self.llm.query(prompt, system_prompt=self.LLM_COMMAND_SYSTEM_PROMPT)
+            if not raw:
+                return None
+
+            cleaned = raw.strip()
+            if cleaned.startswith("```"):
+                lines = cleaned.split("\n")
+                cleaned = "\n".join(
+                    line for line in lines if not line.strip().startswith("```")
+                )
+
+            parsed = json.loads(cleaned)
+            if isinstance(parsed, dict) and "action" in parsed:
+                return parsed
+        except Exception as e:
+            logger.debug(f"LLM followup parsing failed: {e}")
+        return None
 
     def get_missing_fields(self, intent: Dict[str, Any]) -> List[str]:
         """Return list of required fields that are missing from the intent."""

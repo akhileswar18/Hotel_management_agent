@@ -64,7 +64,8 @@ class OrderAgent(BaseAgent):
 
     def _handle_create(self, event: Event) -> Event:
         table_id = event.payload.get("table_id", "1")
-        user_id = event.payload.get("user_id", "")
+        # Prefer event.user_id (set by the original API request), fallback to payload
+        user_id = event.user_id or event.payload.get("user_id", "")
         order = self.sales_service.create_order(
             table_id=table_id,
             created_by=UUID(user_id) if user_id else UUID("00000000-0000-0000-0000-000000000000"),

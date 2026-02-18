@@ -46,7 +46,7 @@ class HMSButton(ft.ElevatedButton):
         **kwargs
     ):
         super().__init__(
-            text=text,
+            text,
             on_click=on_click,
             width=width,
             height=height,
@@ -153,7 +153,7 @@ class NumericKeypad(ft.Column):
             self.on_key_press(text)
 
         return ft.ElevatedButton(
-            text=text,
+            text,
             on_click=handle_click,
             width=width,
             height=56,
@@ -471,7 +471,7 @@ class RefreshButton(ft.Container):
 
         # Icon button (visible when idle)
         self._icon_button = ft.IconButton(
-            icon=ft.icons.REFRESH,
+            icon=ft.Icons.REFRESH,
             icon_color=HMSColors.PRIMARY,
             icon_size=24,
             tooltip=tooltip,

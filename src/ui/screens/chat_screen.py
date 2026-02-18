@@ -33,7 +33,7 @@ class ChatScreen(ft.Column):
             on_submit=self._handle_send,
         )
         self.send_button = ft.IconButton(
-            ft.icons.SEND,
+            ft.Icons.SEND,
             on_click=self._handle_send,
             tooltip="Send message",
         )
@@ -215,7 +215,9 @@ class ChatScreen(ft.Column):
             if response.status_code == 200:
                 data = response.json()
                 answer = data.get("answer", "") or data.get("message", "No response")
-                self.chat_history.controls.append(self._hms_bubble(answer))
+                source = data.get("source", "")
+                tag = " [AI]" if source == "llm" else " [Data]" if source == "rules" else ""
+                self.chat_history.controls.append(self._hms_bubble(f"{answer}{tag}"))
             else:
                 self.chat_history.controls.append(
                     self._hms_bubble(f"Error {response.status_code}", success=False)
@@ -256,17 +258,20 @@ class ChatScreen(ft.Column):
                     # Store the incomplete intent and show the follow-up question
                     self._pending_intent = intent
                     action_label = intent.get("action", "").replace("_", " ").title()
-                    missing = data.get("missing_fields", [])
+                    parsed_by = data.get("parsed_by", "")
+                    tag = " [AI]" if parsed_by == "llm" else ""
                     self.chat_history.controls.append(
                         self._hms_bubble(
-                            f"[{action_label}] I need more info:\n{message}"
+                            f"[{action_label}]{tag} I need more info:\n{message}"
                         )
                     )
 
                 elif status == "success":
                     # Clear pending intent on success
                     self._pending_intent = None
-                    self.chat_history.controls.append(self._hms_bubble(message))
+                    parsed_by = data.get("parsed_by", "")
+                    tag = " [AI]" if parsed_by == "llm" else ""
+                    self.chat_history.controls.append(self._hms_bubble(f"{message}{tag}"))
 
                 elif status == "error":
                     self._pending_intent = None

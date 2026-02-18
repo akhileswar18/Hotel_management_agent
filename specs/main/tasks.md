@@ -325,7 +325,37 @@ US1 (EventBus + OrderAgent)   ← BLOCKING: Foundation for all agents
 | US5 | InsightAgent (LLM) | 15 (A090-A104) | US4 | **COMPLETE** |
 | US6 | Orchestrator + Voice/Chat | 19 (A110-A138) | US5 | **COMPLETE** |
 | US7 | Polish + Docs | 8 (A140-A147) | US6 | **COMPLETE** |
-| **Total** | | **109 tasks** | | **109/109 DONE** |
+| AC | Agent Communication v2 | 20 (AC01-AC20) | US6 | **COMPLETE** |
+| **Total** | | **129 tasks** | | **129/129 DONE** |
+
+---
+
+## Agent Communication v2 (Post-Architecture Polish)
+
+**Goal**: Fix gaps in agent-to-agent communication — auto re-dispatch, middleware, dead letters, PaymentAgent wiring, registry integration.
+
+- [x] AC01 Add `reply_to`, `parent_event_id`, `target_agent` fields to `Event` dataclass — `src/events/event.py`
+- [x] AC02 Add `all_responses` list to `EventResult` to collect all handler responses — `src/events/event.py`
+- [x] AC03 Rewrite `EventBus.publish_sync()` with middleware pipeline execution — `src/events/bus.py`
+- [x] AC04 Implement auto re-dispatch of result events (order.finalized, order.voided, payment.completed, etc.) with depth guard — `src/events/bus.py`
+- [x] AC05 Implement `DeadLetterEntry` with exponential backoff retry and `retry_dead_letters()` — `src/events/bus.py`
+- [x] AC06 Add `set_registry()` for AgentRegistry integration and `target_agent` direct addressing — `src/events/bus.py`
+- [x] AC07 Add handler name tracking for debugging (`_handler_names` dict) — `src/events/bus.py`
+- [x] AC08 Wire `TimingMiddleware` and `ErrorCatchMiddleware` into EventBus at startup — `src/api/app.py`
+- [x] AC09 Refactor agent registration to use `AgentRegistry` + loop pattern — `src/api/app.py`
+- [x] AC10 Remove manual re-dispatch hack from `_publish_order_event()` (EventBus handles it) — `src/api/app.py`
+- [x] AC11 Wire `PaymentAgent` to subscribe to `order.finalized` (not just `payment.process`) — `src/agents/payment_agent.py`
+- [x] AC12 Add `parent_event_id` to PaymentAgent responses for reply chain tracing — `src/agents/payment_agent.py`
+- [x] AC13 Add `GET /api/agents/health` endpoint (agent list, subscriptions, dead letter status) — `src/api/app.py`
+- [x] AC14 Add `POST /api/agents/retry-dead-letters` endpoint — `src/api/app.py`
+- [x] AC15 Add `POST /api/agents/send` endpoint for direct agent addressing — `src/api/app.py`
+- [x] AC16 Verified: middleware pipeline (TimingMiddleware + ErrorCatchMiddleware) wraps every handler call
+- [x] AC17 Verified: auto re-dispatch triggers InventoryAgent on Orchestrator-driven order.finalize
+- [x] AC18 Verified: dead letter retry with exponential backoff succeeds on transient failures
+- [x] AC19 Verified: direct agent addressing via `target_agent` routes to correct agent
+- [x] AC20 Verified: reply chain tracing via `reply_to` + `parent_event_id` roundtrips correctly
+
+**Checkpoint AC COMPLETE**: All agent communication gaps fixed. 20/20 tasks done.
 
 ---
 

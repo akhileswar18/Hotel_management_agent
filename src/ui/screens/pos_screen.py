@@ -101,7 +101,7 @@ class POSScreen(ft.Column):
         )
 
         self.voice_button = ft.IconButton(
-            icon=ft.icons.MIC,
+            icon=ft.Icons.MIC,
             tooltip="Voice order (coming soon)",
             on_click=self._handle_voice_click,
         )
@@ -874,14 +874,14 @@ class POSScreen(ft.Column):
                                     size=13, weight="bold",
                                 ),
                                 ft.IconButton(
-                                    icon=ft.icons.EDIT,
+                                    icon=ft.Icons.EDIT,
                                     icon_color=HMSColors.PRIMARY,
                                     icon_size=18,
                                     tooltip="Edit quantity",
                                     on_click=lambda e, lid=li_id, q=li_qty: self._handle_edit_qty(lid, q),
                                 ),
                                 ft.IconButton(
-                                    icon=ft.icons.DELETE_OUTLINE,
+                                    icon=ft.Icons.DELETE_OUTLINE,
                                     icon_color=HMSColors.ERROR,
                                     icon_size=18,
                                     tooltip="Remove item",

@@ -18,9 +18,12 @@ When the app fails to start or the UI shows errors:
 - [ ] Check NavigationRail uses NavigationRailDestination (not NavigationDestination)
 - [ ] Check NavigationRail has bounded height (not wrapped in unbounded Column)
 - [ ] Check ft.Column subclasses use self._page, NOT self.page (Flet property conflict)
-- [ ] Check icon references use ft.icons.X (lowercase), NOT ft.Icons.X (capitalized)
+- [ ] Check icon references use ft.Icons.X (capitalized class), NOT ft.icons.X (bare module — removed in 0.80.x)
 - [ ] Check nested dialog callbacks for variable shadowing (use nonlocal + distinct names)
 - [ ] Check IntentParser priority order — compound phrases before broad keywords (Error 11)
+- [ ] Check text-command endpoint checks result.event.type for workflow.failed (Error 12)
+- [ ] Check OrderAgent uses event.user_id (not just payload.user_id) to avoid FK violation (Error 13)
+- [ ] Check ElevatedButton/TextButton use positional text arg, NOT text= keyword (0.80.x)
 - [ ] Check ports 8000/8080 are not already occupied by stale processes
 - [ ] (Agents) Check event_log table for recent events if event-driven behavior is missing
 - [ ] (Agents) Verify agents are registered and subscribed in API startup (AgentRegistry)
@@ -219,31 +222,34 @@ class POSScreen(ft.Column):
 
 ---
 
-## Error 7: `module 'flet' has no attribute 'Icons'` (capitalization)
+## Error 7: `module 'flet.controls.material.icons' has no attribute 'X'` (icon API change)
 
 **Symptom**: App crashes with:
 ```
-AttributeError: module 'flet' has no attribute 'Icons'
+AttributeError: module 'flet.controls.material.icons' has no attribute 'ERROR'
 ```
+(or any other icon constant like `SHOPPING_CART`, `DARK_MODE`, etc.)
 
-**Cause**: Flet 0.80.x uses **lowercase** `ft.icons` for icon constants. Older versions or autocomplete may suggest `ft.Icons` (capitalized).
+**Cause**: In Flet 0.80.5, the icon constants moved from the bare `ft.icons` module to the `ft.Icons` class (a proxy class at `ft.icons.Icons`). The old `ft.icons.SHOPPING_CART` no longer works.
 
-**Fix**: Always use `ft.icons.ICON_NAME` (lowercase `icons`):
+**Fix**: Always use `ft.Icons.ICON_NAME` (capitalized `Icons` class):
 
 ```python
-# BAD — Flet 0.80.x
-ft.Icons.SHOPPING_CART
-ft.Icons.DARK_MODE
-
-# GOOD — Flet 0.80.x
+# BAD — Flet 0.80.5 (bare module no longer has constants)
 ft.icons.SHOPPING_CART
 ft.icons.DARK_MODE
+ft.icons.ERROR
+
+# GOOD — Flet 0.80.5
+ft.Icons.SHOPPING_CART
+ft.Icons.DARK_MODE
+ft.Icons.ERROR
 ```
 
 To find and fix all instances:
 ```powershell
-rg "ft\.Icons\." src/ --files-with-matches
-# Then replace ft.Icons. with ft.icons. in each file
+rg "ft\.icons\.[A-Z]" src/ --files-with-matches
+# Then replace ft.icons. with ft.Icons. in each file
 ```
 
 ---
@@ -332,7 +338,7 @@ Start the API first, then the UI.
 - Flet version: **0.80.5** (check with `python -c "import flet; print(flet.__version__)"`)
 - Flet UI runs in `WEB_BROWSER` mode on port 8080
 - All screens extend `ft.Column` — **always use `self._page` not `self.page`**
-- Icon constants: **always `ft.icons.X`** (lowercase), never `ft.Icons.X`
+- Icon constants: **always `ft.Icons.X`** (capitalized class), never bare `ft.icons.X`
 - NavigationRail: **always place directly in Row**, use `trailing` for extra widgets
 - Screens make HTTP calls to the FastAPI backend — use sync `httpx.Client`, never `asyncio.run()`
 - Page transitions: use `page.controls = [...]` + `page.update()`, never `page.clean()` + `page.add()`
@@ -444,3 +450,23 @@ If no rows appear after an action (e.g. order finalized), the middleware may not
 - **Wrong event type**: Handler is subscribed to a different `event_type` than the one being published (e.g. subscribing to `order.created` but publishing `OrderCreated`). Ensure event type strings match exactly.
 - **Handler raises**: If one handler raises, the bus may stop dispatching to other handlers or the request may fail. Check logs for tracebacks from agent handlers; fix or catch exceptions so one failing agent doesn’t break others.
 - **Async vs sync**: If the bus or handlers are async, ensure they are awaited correctly from the request path. If handlers are sync but the bus runs in an async context, ensure the bus doesn’t deadlock (e.g. use `run_in_executor` or sync dispatch as appropriate).
+
+---
+
+## Error 12: Text-command endpoint returns success even when workflow failed
+
+**Symptom**: User types "create order for table 5 with 3 coke", gets "Order created!" but the order has no items. Then "finalize" fails with "Cannot finalize order with no items."
+
+**Cause**: The text-command endpoint checked `result.success` (EventBus dispatch success) but NOT `result.event.type`. The orchestrator returned `workflow.failed` but the endpoint treated ANY event as success.
+
+**Fix**: In `src/api/app.py`, after `result = event_bus.publish_sync(event)`, check `result.event.type == "workflow.failed"` or `.endswith(".error")` before declaring success.
+
+---
+
+## Error 13: OrderAgent fails with FOREIGN KEY constraint on empty user_id
+
+**Symptom**: `order.create` step fails with "FOREIGN KEY constraint failed" when `user_id` is empty.
+
+**Cause**: `OrderAgent._handle_create` read `user_id` from `event.payload` but the OrchestratorAgent did not always set it. The `event.user_id` field (set by the API from the logged-in session) was the correct source.
+
+**Fix**: In `src/agents/order_agent.py`, use `event.user_id or event.payload.get("user_id", "")` to prefer the event-level user_id.

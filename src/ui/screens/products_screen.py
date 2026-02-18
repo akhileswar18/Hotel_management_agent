@@ -164,14 +164,14 @@ class ProductsScreen(ft.Column):
                             horizontal_alignment=ft.CrossAxisAlignment.CENTER,
                         ),
                         ft.IconButton(
-                            icon=ft.icons.EDIT,
+                            icon=ft.Icons.EDIT,
                             icon_color=HMSColors.PRIMARY,
                             icon_size=20,
                             tooltip="Edit product",
                             on_click=lambda e, iid=item_id: self._handle_edit_product(iid),
                         ),
                         ft.IconButton(
-                            icon=ft.icons.ARCHIVE,
+                            icon=ft.Icons.ARCHIVE,
                             icon_color=HMSColors.ERROR,
                             icon_size=20,
                             tooltip="Archive product",

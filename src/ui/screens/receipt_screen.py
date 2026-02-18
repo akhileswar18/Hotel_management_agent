@@ -55,7 +55,7 @@ class ReceiptScreen(ft.Column):
                 ft.Row([
                     ft.Text(receipt_url or "N/A", size=12, selectable=True, expand=True, no_wrap=False),
                     ft.IconButton(
-                        icon=ft.icons.COPY,
+                        icon=ft.Icons.COPY,
                         tooltip="Copy link",
                         on_click=_copy_url,
                         data=receipt_url,

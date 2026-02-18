@@ -6,9 +6,12 @@ sub-events and executes them sequentially. Rolls back (e.g. void order)
 on step failure. Rule-based; does not write to DB or use LLM.
 """
 
+import logging
 from typing import Optional, List, Dict, Any
 from src.agents.base import BaseAgent
 from src.events.event import Event
+
+logger = logging.getLogger("hms.orchestrator")
 
 
 class OrchestratorAgent(BaseAgent):
@@ -26,7 +29,9 @@ class OrchestratorAgent(BaseAgent):
     def handle(self, event: Event) -> Optional[Event]:
         """Handle multi-step workflow events."""
         intent = event.payload.get("intent", {})
+        logger.info(f"Orchestrator received workflow: action={intent.get('action')}, items={len(intent.get('items', []))}")
         steps = self._decompose_intent(intent)
+        logger.info(f"Decomposed into {len(steps)} steps: {[s['type'] for s in steps]}")
         return self._execute_steps(steps, event)
 
     def _decompose_intent(self, intent: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -39,7 +44,7 @@ class OrchestratorAgent(BaseAgent):
                 "type": "order.create",
                 "payload": {
                     "table_id": intent.get("table_id", "1"),
-                    "user_id": intent.get("user_id", ""),
+                    # user_id will be inherited from event.user_id in _execute_steps
                 },
             })
             for item in intent.get("items", []):
@@ -85,6 +90,8 @@ class OrchestratorAgent(BaseAgent):
             if order_id and "order_id" not in payload:
                 payload["order_id"] = order_id
 
+            logger.info(f"Step {i}: {step['type']} payload_keys={list(payload.keys())}")
+
             sub_event = Event.create(
                 type=step["type"],
                 source=self.name,
@@ -94,17 +101,28 @@ class OrchestratorAgent(BaseAgent):
             )
             result = self.event_bus.publish_sync(sub_event)
 
+            logger.info(
+                f"Step {i} result: success={result.success}, "
+                f"event_type={result.event.type if result.event else None}, "
+                f"error={result.error}"
+            )
+
             if not result.success or (
                 result.event and result.event.type.endswith(".error")
             ):
+                err_detail = result.error or "Step failed"
+                if result.event and result.event.payload:
+                    err_detail = result.event.payload.get("message", err_detail)
+                logger.warning(f"Step {i} ({step['type']}) FAILED: {err_detail}")
                 # Rollback: void the order if one was created
                 if order_id:
+                    logger.info(f"Rolling back order {order_id}")
                     void_event = Event.create(
                         type="order.void",
                         source=self.name,
                         payload={
                             "order_id": order_id,
-                            "reason": "Workflow step failed",
+                            "reason": f"Workflow step {i} failed: {err_detail}",
                         },
                         user_id=original_event.user_id,
                         correlation_id=original_event.correlation_id,
@@ -116,13 +134,14 @@ class OrchestratorAgent(BaseAgent):
                     correlation_id=original_event.correlation_id,
                     payload={
                         "step": i,
-                        "error": result.error or "Step failed",
+                        "error": err_detail,
                     },
                 )
 
             # Extract order_id from first step if it was order.create
             if result.event and step["type"] == "order.create":
                 order_id = result.event.payload.get("order_id")
+                logger.info(f"Order created with ID: {order_id}")
 
             results.append({"step": i, "type": step["type"], "status": "ok"})
 

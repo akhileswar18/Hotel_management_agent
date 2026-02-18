@@ -37,7 +37,7 @@ class HMSApp:
         # Global error banner
         self.error_banner = ft.Banner(
             bgcolor="#F44336",
-            leading=ft.Icon(ft.icons.ERROR, color="#FFFFFF"),
+            leading=ft.Icon(ft.Icons.ERROR, color="#FFFFFF"),
             content=ft.Text("", color="#FFFFFF"),
             actions=[
                 ft.TextButton("Dismiss", style=ft.ButtonStyle(color="#FFFFFF"),
@@ -71,43 +71,43 @@ class HMSApp:
 
         destinations = [
             ft.NavigationRailDestination(
-                icon=ft.icons.SHOPPING_CART,
-                selected_icon=ft.icons.SHOPPING_CART,
+                icon=ft.Icons.SHOPPING_CART,
+                selected_icon=ft.Icons.SHOPPING_CART,
                 label="POS",
             ),
             ft.NavigationRailDestination(
-                icon=ft.icons.INVENTORY_2,
-                selected_icon=ft.icons.INVENTORY_2,
+                icon=ft.Icons.INVENTORY_2,
+                selected_icon=ft.Icons.INVENTORY_2,
                 label="Products",
             ),
             ft.NavigationRailDestination(
-                icon=ft.icons.HISTORY,
-                selected_icon=ft.icons.HISTORY,
+                icon=ft.Icons.HISTORY,
+                selected_icon=ft.Icons.HISTORY,
                 label="Orders",
             ),
             ft.NavigationRailDestination(
-                icon=ft.icons.ASSESSMENT,
-                selected_icon=ft.icons.ASSESSMENT,
+                icon=ft.Icons.ASSESSMENT,
+                selected_icon=ft.Icons.ASSESSMENT,
                 label="Reports",
             ),
             ft.NavigationRailDestination(
-                icon=ft.icons.CHAT,
-                selected_icon=ft.icons.CHAT,
+                icon=ft.Icons.CHAT,
+                selected_icon=ft.Icons.CHAT,
                 label="Chat",
             ),
         ]
         if is_manager_or_admin:
             destinations.append(
                 ft.NavigationRailDestination(
-                    icon=ft.icons.PEOPLE,
-                    selected_icon=ft.icons.PEOPLE,
+                    icon=ft.Icons.PEOPLE,
+                    selected_icon=ft.Icons.PEOPLE,
                     label="Users",
                 ),
             )
 
         # Dark mode toggle (placed inside nav rail's trailing slot)
         dark_mode_toggle = ft.IconButton(
-            icon=ft.icons.DARK_MODE if self.page.theme_mode == ft.ThemeMode.LIGHT else ft.icons.LIGHT_MODE,
+            icon=ft.Icons.DARK_MODE if self.page.theme_mode == ft.ThemeMode.LIGHT else ft.Icons.LIGHT_MODE,
             icon_color="#757575",
             tooltip="Toggle dark/light mode",
             on_click=self._toggle_theme,
@@ -197,10 +197,10 @@ class HMSApp:
         """Toggle between light and dark mode."""
         if self.page.theme_mode == ft.ThemeMode.LIGHT:
             self.page.theme_mode = ft.ThemeMode.DARK
-            self.dark_mode_btn.icon = ft.icons.LIGHT_MODE
+            self.dark_mode_btn.icon = ft.Icons.LIGHT_MODE
         else:
             self.page.theme_mode = ft.ThemeMode.LIGHT
-            self.dark_mode_btn.icon = ft.icons.DARK_MODE
+            self.dark_mode_btn.icon = ft.Icons.DARK_MODE
         self.page.update()
 
     def _dismiss_banner(self, e):

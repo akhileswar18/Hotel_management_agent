@@ -237,7 +237,8 @@ def _event_payload_to_response(payload: dict) -> OrderResponse:
 def _publish_order_event(event_bus: "EventBus", event: Event) -> OrderResponse:
     """Publish an order event to the bus and convert the result to an OrderResponse.
 
-    Re-dispatches order.finalized and order.voided so InventoryAgent (and others) can react.
+    EventBus auto re-dispatches result events (order.finalized, order.voided, etc.)
+    to trigger downstream agents (InventoryAgent, PaymentAgent, etc.).
     Raises ValueError if the event bus returns an error (order.error) or fails.
     """
     result = event_bus.publish_sync(event)
@@ -247,8 +248,6 @@ def _publish_order_event(event_bus: "EventBus", event: Event) -> OrderResponse:
         error_msg = result.event.payload.get("message", "Order operation failed")
         raise ValueError(error_msg)
     if result.event:
-        if result.event.type in ("order.finalized", "order.voided"):
-            event_bus.publish_sync(result.event)
         return _event_payload_to_response(result.event.payload)
     raise ValueError("No response from event handler")
 
@@ -292,52 +291,44 @@ def create_app() -> FastAPI:
     event_store = EventStore()
     event_bus = EventBus(store=event_store)
 
-    # Register agents
+    # Wire middleware pipeline (logging → timing → error-catch)
+    from src.events.middleware import TimingMiddleware, ErrorCatchMiddleware
+    event_bus.add_middleware(TimingMiddleware())
+    event_bus.add_middleware(ErrorCatchMiddleware())
+
+    # Set up AgentRegistry for centralized agent management
+    from src.agents.registry import AgentRegistry
+    registry = AgentRegistry()
+
+    # Create all agents
     order_agent = OrderAgent()
     audit_agent = AuditAgent()
-
-    # Subscribe OrderAgent to its declared event types
-    for event_type in order_agent.subscribes_to:
-        event_bus.subscribe(event_type, order_agent.handle)
-
-    # Subscribe AuditAgent to all events (wildcard)
-    for event_type in audit_agent.subscribes_to:
-        event_bus.subscribe(event_type, audit_agent.handle)
-
-    # Register InventoryAgent (needs bus to publish low_stock/out_of_stock alerts)
     inventory_agent = InventoryAgent(event_bus=event_bus)
-    for event_type in inventory_agent.subscribes_to:
-        event_bus.subscribe(event_type, inventory_agent.handle)
-
-    # Subscribe PaymentAgent, AuthAgent, PrintAgent, NotificationAgent, ReportingAgent
     payment_agent = PaymentAgent()
     auth_agent = AuthAgent()
     print_agent = PrintAgent()
     notification_agent = NotificationAgent()
     reporting_agent = ReportingAgent()
-    for event_type in payment_agent.subscribes_to:
-        event_bus.subscribe(event_type, payment_agent.handle)
-    for event_type in auth_agent.subscribes_to:
-        event_bus.subscribe(event_type, auth_agent.handle)
-    for event_type in print_agent.subscribes_to:
-        event_bus.subscribe(event_type, print_agent.handle)
-    for event_type in notification_agent.subscribes_to:
-        event_bus.subscribe(event_type, notification_agent.handle)
-    for event_type in reporting_agent.subscribes_to:
-        event_bus.subscribe(event_type, reporting_agent.handle)
-
-    # Register InsightAgent (LLM advisory, read-only, degradable)
     insight_agent = InsightAgent()
-    for event_type in insight_agent.subscribes_to:
-        event_bus.subscribe(event_type, insight_agent.handle)
-
-    # Register OrchestratorAgent (multi-step workflows; needs bus to fire sub-events)
     orchestrator_agent = OrchestratorAgent(event_bus=event_bus)
-    for event_type in orchestrator_agent.subscribes_to:
-        event_bus.subscribe(event_type, orchestrator_agent.handle)
 
-    # Store on app.state for external access (tests, UI polling for notifications)
+    # Register all agents with the registry
+    all_agents = [
+        order_agent, audit_agent, inventory_agent, payment_agent,
+        auth_agent, print_agent, notification_agent, reporting_agent,
+        insight_agent, orchestrator_agent,
+    ]
+    for agent in all_agents:
+        registry.register(agent)
+        for event_type in agent.subscribes_to:
+            event_bus.subscribe(event_type, agent.handle, name=agent.name)
+
+    # Connect registry to EventBus for direct agent addressing
+    event_bus.set_registry(registry)
+
+    # Store on app.state for external access (tests, UI polling, dead letter retries)
     app.state.event_bus = event_bus
+    app.state.registry = registry
     app.state.notification_agent = notification_agent
 
     # Security: Add basic rate limiting middleware
@@ -940,7 +931,8 @@ def create_app() -> FastAPI:
 
     @app.post("/api/insights/query")
     async def natural_language_query(request: dict = Body(...)) -> dict:
-        """Natural language query over sales/reporting data. Degrades if LLM unavailable."""
+        """Natural language query over sales/reporting data.
+        Always returns an answer (LLM-powered or rule-based fallback)."""
         question = request.get("question", "")
         event = Event.create(
             type="insight.natural_query",
@@ -948,9 +940,12 @@ def create_app() -> FastAPI:
             source="API",
         )
         result = event_bus.publish_sync(event)
-        if result.success and result.event and result.event.type == "insight.query_result":
-            return result.event.payload
-        return {"answer": "", "message": "Insight unavailable"}
+        if result.success and result.event:
+            if result.event.type == "insight.query_result":
+                return result.event.payload
+            if result.event.type == "insight.error":
+                return {"answer": "", "message": result.event.payload.get("message", "Query failed")}
+        return {"answer": "", "message": "Could not process the query. Try asking about sales, inventory, or orders."}
 
     # ===== Voice WebSocket (A124) =====
     @app.websocket("/ws/voice")
@@ -1014,6 +1009,7 @@ def create_app() -> FastAPI:
                 intent = parser.parse(request.text)
 
             action = intent.get("action", "unknown")
+            parsed_by = intent.pop("_parsed_by", "rules")  # Extract and remove internal marker
 
             # Check for missing required fields → ask follow-up
             missing = parser.get_missing_fields(intent)
@@ -1024,6 +1020,7 @@ def create_app() -> FastAPI:
                     "intent": intent,
                     "missing_fields": missing,
                     "message": prompt,
+                    "parsed_by": parsed_by,
                 }
 
             # --- Execute the command based on action ---
@@ -1040,11 +1037,31 @@ def create_app() -> FastAPI:
                 )
                 result = event_bus.publish_sync(event)
                 if result.success and result.event:
+                    # Check if the orchestrator reported a workflow failure
+                    evt_type = result.event.type or ""
+                    if evt_type == "workflow.failed" or evt_type.endswith(".error"):
+                        err_msg = result.event.payload.get("error", "Workflow step failed")
+                        return {
+                            "status": "error",
+                            "intent": intent,
+                            "message": f"Order failed: {err_msg}",
+                        }
+                    payload_result = result.event.payload
+                    items_desc = ", ".join(
+                        f"{i.get('name','?')} x{i.get('quantity',1)}"
+                        for i in intent.get("items", [])
+                    )
+                    order_id = payload_result.get("order_id", "")
+                    table_id = intent.get("table_id", "?")
+                    msg = f"Order created for table {table_id}"
+                    if items_desc:
+                        msg += f" with {items_desc}"
+                    msg += "!"
                     return {
                         "status": "success",
                         "intent": intent,
-                        "result": result.event.payload,
-                        "message": "Order created successfully!",
+                        "result": payload_result,
+                        "message": msg,
                     }
                 else:
                     return {
@@ -1210,6 +1227,7 @@ def create_app() -> FastAPI:
                 return {
                     "status": "info",
                     "intent": intent,
+                    "parsed_by": parsed_by,
                     "message": (
                         "I didn't understand that command. Try:\n"
                         "• 'create order for table 5 with 2 biryani'\n"
@@ -1224,6 +1242,67 @@ def create_app() -> FastAPI:
 
         except Exception as e:
             raise HTTPException(status_code=400, detail=str(e))
+
+    # ===== Agent Communication Endpoints =====
+
+    @app.get("/api/agents/health")
+    async def agent_health():
+        """Agent system health: registered agents, subscriptions, dead letter status."""
+        agents_list = []
+        if hasattr(app.state, "registry"):
+            for agent in app.state.registry.list_agents():
+                agents_list.append({
+                    "name": agent.name,
+                    "subscribes_to": agent.subscribes_to,
+                    "publishes": agent.publishes,
+                    "writes_to_db": agent.writes_to_db,
+                    "uses_llm": agent.uses_llm,
+                    "degradable": agent.degradable,
+                })
+        return {
+            "agents": agents_list,
+            "agent_count": len(agents_list),
+            "subscriber_count": event_bus.subscriber_count,
+            "dead_letter_count": event_bus.dead_letter_count,
+            "dead_letters": [
+                {
+                    "event_type": dl.event.type,
+                    "error": dl.error,
+                    "handler": dl.handler_name,
+                    "attempts": dl.attempts,
+                    "can_retry": dl.can_retry,
+                }
+                for dl in event_bus.dead_letter[:20]
+            ],
+        }
+
+    @app.post("/api/agents/retry-dead-letters")
+    async def retry_dead_letters():
+        """Retry failed events in the dead letter queue."""
+        summary = event_bus.retry_dead_letters()
+        return {"status": "ok", **summary}
+
+    @app.post("/api/agents/send")
+    async def send_agent_event(
+        event_type: str,
+        target_agent: str = None,
+        payload: dict = None,
+    ):
+        """Send an event directly, optionally targeting a specific agent."""
+        event = Event.create(
+            type=event_type,
+            payload=payload or {},
+            source="API-direct",
+            target_agent=target_agent,
+        )
+        result = event_bus.publish_sync(event)
+        return {
+            "success": result.success,
+            "event": result.event.to_dict() if result.event else None,
+            "error": result.error,
+            "elapsed_ms": result.elapsed_ms,
+            "responses_count": len(result.all_responses),
+        }
 
     # Global error handler
     @app.exception_handler(Exception)
