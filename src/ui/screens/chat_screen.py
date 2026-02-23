@@ -33,7 +33,7 @@ class ChatScreen(ft.Column):
             on_submit=self._handle_send,
         )
         self.send_button = ft.IconButton(
-            ft.Icons.SEND,
+            ft.icons.SEND,
             on_click=self._handle_send,
             tooltip="Send message",
         )

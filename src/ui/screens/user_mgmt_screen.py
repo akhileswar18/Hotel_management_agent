@@ -52,7 +52,7 @@ class UserManagementScreen(ft.Column):
                 ft.Container(
                     content=ft.Row(
                         [
-                            ft.Icon(ft.Icons.PEOPLE, color=HMSColors.PRIMARY, size=28),
+                            ft.Icon(ft.icons.PEOPLE, color=HMSColors.PRIMARY, size=28),
                             ft.Text("User Management", size=22, weight="bold"),
                             ft.Container(expand=True),
                             refresh_btn,
@@ -129,7 +129,7 @@ class UserManagementScreen(ft.Column):
         return ft.Container(
             content=ft.Row(
                 [
-                    ft.Icon(ft.Icons.PERSON, color=role_color, size=30),
+                    ft.Icon(ft.icons.PERSON, color=role_color, size=30),
                     ft.Column(
                         [
                             ft.Text(username, size=16, weight="bold"),
@@ -149,14 +149,14 @@ class UserManagementScreen(ft.Column):
                         expand=True,
                     ),
                     ft.IconButton(
-                        icon=ft.Icons.EDIT,
+                        icon=ft.icons.EDIT,
                         icon_color=HMSColors.PRIMARY,
                         icon_size=20,
                         tooltip="Edit role",
                         on_click=lambda e, uid=user_id: self._handle_edit_user(uid),
                     ),
                     ft.IconButton(
-                        icon=ft.Icons.LOCK_RESET,
+                        icon=ft.icons.LOCK_RESET,
                         icon_color=HMSColors.WARNING,
                         icon_size=20,
                         tooltip="Reset PIN",

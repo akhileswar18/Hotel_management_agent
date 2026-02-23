@@ -471,7 +471,7 @@ class RefreshButton(ft.Container):
 
         # Icon button (visible when idle)
         self._icon_button = ft.IconButton(
-            icon=ft.Icons.REFRESH,
+            icon=ft.icons.REFRESH,
             icon_color=HMSColors.PRIMARY,
             icon_size=24,
             tooltip=tooltip,

@@ -18,7 +18,7 @@ When the app fails to start or the UI shows errors:
 - [ ] Check NavigationRail uses NavigationRailDestination (not NavigationDestination)
 - [ ] Check NavigationRail has bounded height (not wrapped in unbounded Column)
 - [ ] Check ft.Column subclasses use self._page, NOT self.page (Flet property conflict)
-- [ ] Check icon references use ft.Icons.X (capitalized class), NOT ft.icons.X (bare module — removed in 0.80.x)
+- [ ] Check icon references use ft.icons.X (lowercase module), NOT ft.Icons.X (may not exist in venv/older versions)
 - [ ] Check nested dialog callbacks for variable shadowing (use nonlocal + distinct names)
 - [ ] Check IntentParser priority order — compound phrases before broad keywords (Error 11)
 - [ ] Check text-command endpoint checks result.event.type for workflow.failed (Error 12)
@@ -222,34 +222,48 @@ class POSScreen(ft.Column):
 
 ---
 
-## Error 7: `module 'flet.controls.material.icons' has no attribute 'X'` (icon API change)
+## Error 7: `module 'flet' has no attribute 'Icons'` or `module 'flet.controls.material.icons' has no attribute 'X'` (icon API version mismatch)
 
 **Symptom**: App crashes with:
 ```
+AttributeError: module 'flet' has no attribute 'Icons'
+```
+or
+```
 AttributeError: module 'flet.controls.material.icons' has no attribute 'ERROR'
 ```
-(or any other icon constant like `SHOPPING_CART`, `DARK_MODE`, etc.)
 
-**Cause**: In Flet 0.80.5, the icon constants moved from the bare `ft.icons` module to the `ft.Icons` class (a proxy class at `ft.icons.Icons`). The old `ft.icons.SHOPPING_CART` no longer works.
+**Cause**: Different Flet versions use different icon APIs:
+- **venv/older versions**: Use `ft.icons.X` (lowercase module with constants)
+- **Some environments**: May have `ft.Icons.X` (capitalized class proxy)
+- **Version mismatch**: Code written for one API fails in another environment
 
-**Fix**: Always use `ft.Icons.ICON_NAME` (capitalized `Icons` class):
+**Fix**: Always use `ft.icons.ICON_NAME` (lowercase `icons` module) for maximum compatibility:
 
 ```python
-# BAD — Flet 0.80.5 (bare module no longer has constants)
-ft.icons.SHOPPING_CART
-ft.icons.DARK_MODE
-ft.icons.ERROR
-
-# GOOD — Flet 0.80.5
+# BAD — May not exist in venv/older versions
 ft.Icons.SHOPPING_CART
 ft.Icons.DARK_MODE
 ft.Icons.ERROR
+
+# GOOD — Works across Flet versions
+ft.icons.SHOPPING_CART
+ft.icons.DARK_MODE
+ft.icons.ERROR
 ```
 
 To find and fix all instances:
 ```powershell
-rg "ft\.icons\.[A-Z]" src/ --files-with-matches
-# Then replace ft.icons. with ft.Icons. in each file
+rg "ft\.Icons\." src/ --files-with-matches
+# Then replace ft.Icons. with ft.icons. in each file
+```
+
+**Note**: If you see `ft.Icons` working in one environment but not another, check Flet versions:
+```python
+import flet as ft
+print(hasattr(ft, 'Icons'))  # May be False in venv
+print(hasattr(ft, 'icons'))  # Should be True
+print(hasattr(ft.icons, 'ERROR'))  # Should be True
 ```
 
 ---
@@ -338,7 +352,7 @@ Start the API first, then the UI.
 - Flet version: **0.80.5** (check with `python -c "import flet; print(flet.__version__)"`)
 - Flet UI runs in `WEB_BROWSER` mode on port 8080
 - All screens extend `ft.Column` — **always use `self._page` not `self.page`**
-- Icon constants: **always `ft.Icons.X`** (capitalized class), never bare `ft.icons.X`
+- Icon constants: **always `ft.icons.X`** (lowercase module) for maximum compatibility across Flet versions
 - NavigationRail: **always place directly in Row**, use `trailing` for extra widgets
 - Screens make HTTP calls to the FastAPI backend — use sync `httpx.Client`, never `asyncio.run()`
 - Page transitions: use `page.controls = [...]` + `page.update()`, never `page.clean()` + `page.add()`
