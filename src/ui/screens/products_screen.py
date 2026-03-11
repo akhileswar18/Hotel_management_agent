@@ -1,19 +1,23 @@
 """
-Products/Inventory Screen
+Menu Management Screen (Products/Inventory)
 
-Manage products: view, add new, update prices, record stock.
+Add, edit, delete menu items. Dark theme, touch-friendly.
 """
 
 import flet as ft
 import httpx
 from src.ui.components.ui_helpers import (
-    HMSButton, HMSColors, HMSInput, show_error_dialog, show_success_dialog, create_header,
+    HMSButton, HMSColors, HMSInput, show_error_dialog, show_success_dialog, build_header,
+    section_header, status_tag, stock_bar, tag_chip, activity_item,
     RefreshButton,
 )
 
+MENU_BG = HMSColors.BG
+MENU_EMERALD = HMSColors.ACCENT
+
 
 class ProductsScreen(ft.Column):
-    """Product management screen."""
+    """Menu management screen: add, edit, delete items (exposed as Menu in nav)."""
 
     def __init__(self, page: ft.Page, user_info: dict, on_back):
         self._page = page
@@ -22,80 +26,90 @@ class ProductsScreen(ft.Column):
         self.api_base = "http://127.0.0.1:8000"
         self.items = []
 
-        header = create_header(page, "Inventory Management", user_info.get("username"))
+        self.ledger_entries = []
 
-        # Items list
-        self.items_list = ft.ListView(
-            spacing=10,
-            expand=True,
-        )
+        self.items_list = ft.Column(spacing=8, expand=True, scroll=ft.ScrollMode.AUTO)
+        self.alerts_list = ft.Column(spacing=8)
+        self.ledger_list = ft.Column(spacing=6)
+        self.snapshot_grid = ft.Row(spacing=8, wrap=True)
 
-        # Add product button
-        add_product_button = HMSButton(
-            "Add New Product",
-            self._handle_add_product,
-            color=HMSColors.SUCCESS,
-        )
+        add_product_button = HMSButton("Add New Item", self._handle_add_product, height=48, color=MENU_EMERALD, width=150)
+        stock_in_button = HMSButton("Record Stock-In", self._handle_stock_in, color=HMSColors.BLUE, width=150, height=48)
 
-        # Stock-in button
-        stock_in_button = HMSButton(
-            "Record Stock-In",
-            self._handle_stock_in,
-            color=HMSColors.PRIMARY,
-        )
-
-        # Category filter
         self.category_filter = ft.Dropdown(
-            label="Filter by Category",
-            options=[
-                ft.dropdown.Option("", "All Categories"),
-                ft.dropdown.Option("food", "Food"),
-                ft.dropdown.Option("beverage", "Beverage"),
-                ft.dropdown.Option("dessert", "Dessert"),
-                ft.dropdown.Option("other", "Other"),
-            ],
+            label="Category",
+            options=[ft.dropdown.Option("", "All Categories")],
             value="",
             width=200,
             on_change=self._handle_category_filter,
+            bgcolor=HMSColors.SURFACE2,
+            border_color=HMSColors.BORDER,
+            color=HMSColors.TEXT_PRIMARY,
         )
 
-        back_button = HMSButton(
-            "Back to POS",
-            lambda e: on_back(),
+        self.loading = ft.ProgressRing(visible=False, color=HMSColors.ACCENT)
+        self.refresh_button = RefreshButton(on_refresh=self._refresh_with_filter, page=self._page, tooltip="Refresh inventory")
+
+        sidebar = ft.Container(
+            width=280,
+            bgcolor=HMSColors.SURFACE,
+            border=ft.border.only(right=ft.BorderSide(1, HMSColors.BORDER)),
+            padding=16,
+            content=ft.Column(
+                [
+                    section_header("Alerts"),
+                    self.alerts_list,
+                    ft.Divider(color=HMSColors.BORDER),
+                    section_header("Categories"),
+                    self.category_filter,
+                    ft.Divider(color=HMSColors.BORDER),
+                    section_header("Snapshot"),
+                    self.snapshot_grid,
+                ],
+                spacing=10,
+                expand=True,
+            ),
         )
 
-        self.loading = ft.ProgressRing(visible=False)
-
-        # Refresh button — reloads items while preserving category filter
-        self.refresh_button = RefreshButton(
-            on_refresh=self._refresh_with_filter,
-            page=self._page,
-            tooltip="Refresh products",
+        main_area = ft.Container(
+            expand=True,
+            padding=16,
+            content=ft.Column(
+                [
+                    ft.Row(
+                        [
+                            ft.Text("Inventory / Stock", size=20, weight=ft.FontWeight.W_700, color=HMSColors.TEXT_PRIMARY, font_family="Syne"),
+                            ft.Container(expand=True),
+                            self.refresh_button,
+                            add_product_button,
+                            stock_in_button,
+                            HMSButton("Back to POS", lambda e: on_back(), width=130, height=48),
+                        ],
+                        spacing=10,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    ),
+                    ft.Divider(color=HMSColors.BORDER),
+                    section_header("All Items"),
+                    ft.Container(content=self.items_list, expand=True),
+                    ft.Divider(color=HMSColors.BORDER),
+                    section_header("Stock Ledger History"),
+                    ft.Container(content=self.ledger_list, height=200),
+                    ft.Row([self.loading], alignment=ft.MainAxisAlignment.CENTER),
+                ],
+                spacing=10,
+                expand=True,
+            ),
         )
 
         super().__init__(
-            [
-                ft.Row(
-                    [
-                        ft.Text("Products", size=20, weight="bold"),
-                        ft.Container(expand=True),
-                        self.category_filter,
-                        self.refresh_button,
-                        add_product_button,
-                        stock_in_button,
-                        back_button,
-                    ],
-                    spacing=10,
-                ),
-                ft.Divider(),
-                self.items_list,
-                ft.Row([self.loading], alignment=ft.MainAxisAlignment.CENTER),
+            controls=[
+                build_header("Inventory", user_info),
+                ft.Row([sidebar, main_area], spacing=0, expand=True),
             ],
-            spacing=10,
             expand=True,
+            spacing=0,
         )
 
-        # Load items
         self._load_items()
 
     def _refresh_with_filter(self):
@@ -120,75 +134,165 @@ class ProductsScreen(ft.Column):
                 )
                 if response.status_code == 200:
                     self.items = response.json()
+                    self._sync_category_options()
+                    self._load_ledger(client)
                     self._display_items()
         except Exception as e:
             pass
 
+    def _sync_category_options(self):
+        categories = sorted({str(item.get("category", "other")) for item in self.items})
+        opts = [ft.dropdown.Option("", "All Categories")]
+        opts.extend(ft.dropdown.Option(cat, cat.title()) for cat in categories if cat)
+        self.category_filter.options = opts
+        if self.category_filter.page:
+            self.category_filter.update()
+
+    def _load_ledger(self, client: httpx.Client):
+        try:
+            res = client.get(f"{self.api_base}/api/audit/log", params={"limit": 25, "offset": 0})
+            if res.status_code == 200:
+                entries = res.json()
+                self.ledger_entries = [e for e in entries if str(e.get("event_type", "")).startswith("inventory.")]
+            else:
+                self.ledger_entries = []
+        except Exception:
+            self.ledger_entries = []
+
     def _display_items(self):
         """Display items in list."""
         self.items_list.controls.clear()
+        self.alerts_list.controls.clear()
+        self.snapshot_grid.controls.clear()
+        self.ledger_list.controls.clear()
+
+        in_stock = 0
+        low_stock = 0
+        out_stock = 0
 
         for item in self.items:
-            stock = item.get("stock_on_hand", 0)
-            reorder = item.get("reorder_level", 10)
+            stock = int(item.get("stock_on_hand", 0))
+            reorder = int(item.get("reorder_level", 10))
 
             # Stock indicator
             if stock <= 0:
                 stock_color = HMSColors.ERROR
-                stock_badge = "❌ Out"
+                stock_badge = "OUT"
+                out_stock += 1
             elif stock < reorder:
                 stock_color = HMSColors.WARNING
-                stock_badge = f"⚠️  Low ({stock})"
+                stock_badge = "LOW"
+                low_stock += 1
             else:
                 stock_color = HMSColors.SUCCESS
-                stock_badge = f"✓ {stock}"
+                stock_badge = "IN STOCK"
+                in_stock += 1
 
             item_id = item.get("id", "")
-            item_card = ft.Container(
+            row = ft.Container(
                 content=ft.Row(
                     [
-                        ft.Column(
-                            [
-                                ft.Text(item["name"], size=16, weight="bold"),
-                                ft.Text(f"Category: {item['category']}", size=12, color=HMSColors.TEXT_SECONDARY),
-                                ft.Text(f"Price: ₹{item['unit_price']:.2f}", size=14),
-                            ],
-                            spacing=4,
-                            expand=True,
-                        ),
-                        ft.Column(
-                            [
-                                ft.Text(stock_badge, size=14, weight="bold", color=stock_color),
-                                ft.Text(f"Reorder: {reorder}", size=12),
-                            ],
-                            horizontal_alignment=ft.CrossAxisAlignment.CENTER,
-                        ),
+                        ft.Text(str(item["name"]), size=14, weight=ft.FontWeight.W_600, color=HMSColors.TEXT_PRIMARY, width=200),
+                        tag_chip(str(item["category"]).title(), HMSColors.SURFACE2, HMSColors.TEXT_SECONDARY),
+                        ft.Text(f"Rs.{float(item['unit_price']):.2f}", size=13, color=HMSColors.ACCENT2, width=90, font_family="DM Mono"),
+                        stock_bar(stock, max(reorder * 3, stock, 1), stock_color),
+                        ft.Text(str(reorder), size=12, color=HMSColors.TEXT_SECONDARY, width=60),
+                        status_tag(stock_badge, stock_color),
                         ft.IconButton(
                             icon=ft.icons.EDIT,
-                            icon_color=HMSColors.PRIMARY,
+                            icon_color=HMSColors.ACCENT,
                             icon_size=20,
                             tooltip="Edit product",
                             on_click=lambda e, iid=item_id: self._handle_edit_product(iid),
                         ),
                         ft.IconButton(
                             icon=ft.icons.ARCHIVE,
-                            icon_color=HMSColors.ERROR,
+                            icon_color=HMSColors.RED,
                             icon_size=20,
                             tooltip="Archive product",
                             on_click=lambda e, iid=item_id: self._handle_archive_product(iid),
                         ),
                     ],
-                    spacing=20,
+                    spacing=12,
+                    wrap=True,
                     alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
                 ),
-                padding=15,
-                bgcolor=HMSColors.BG_SECONDARY,
+                padding=12,
+                bgcolor=HMSColors.SURFACE,
                 border_radius=8,
-                border=ft.border.all(1, HMSColors.TEXT_SECONDARY if stock > 0 else HMSColors.ERROR),
+                border=ft.border.all(1, HMSColors.BORDER),
             )
-            self.items_list.controls.append(item_card)
+            self.items_list.controls.append(row)
 
-        self.items_list.update()
+            if stock_badge in ("LOW", "OUT"):
+                self.alerts_list.controls.append(
+                    ft.Container(
+                        bgcolor=HMSColors.RED_DIM if stock_badge == "OUT" else HMSColors.YELLOW_DIM,
+                        border=ft.border.all(1, HMSColors.RED + "66" if stock_badge == "OUT" else HMSColors.YELLOW + "66"),
+                        border_radius=8,
+                        padding=10,
+                        content=ft.Column(
+                            [
+                                ft.Text(item["name"], size=12, weight=ft.FontWeight.W_600, color=HMSColors.TEXT_PRIMARY),
+                                ft.Text(f"{stock} / {reorder} units", size=11, color=HMSColors.TEXT_SECONDARY),
+                            ],
+                            spacing=2,
+                            tight=True,
+                        ),
+                    )
+                )
+
+        total = len(self.items)
+        def snap_tile(label: str, value: int, color: str) -> ft.Container:
+            return ft.Container(
+                width=118,
+                height=70,
+                bgcolor=HMSColors.SURFACE2,
+                border=ft.border.all(1, HMSColors.BORDER),
+                border_radius=8,
+                padding=8,
+                content=ft.Column(
+                    [
+                        ft.Text(str(value), size=20, weight=ft.FontWeight.W_700, color=color, font_family="Syne"),
+                        ft.Text(label, size=11, color=HMSColors.TEXT_SECONDARY),
+                    ],
+                    spacing=2,
+                    tight=True,
+                ),
+            )
+
+        self.snapshot_grid.controls = [
+            snap_tile("In Stock", in_stock, HMSColors.GREEN),
+            snap_tile("Low", low_stock, HMSColors.YELLOW),
+            snap_tile("Out", out_stock, HMSColors.RED),
+            snap_tile("Total", total, HMSColors.BLUE),
+        ]
+
+        if not self.alerts_list.controls:
+            self.alerts_list.controls.append(ft.Text("No critical alerts", color=HMSColors.TEXT_SECONDARY, size=12))
+
+        if not self.ledger_entries:
+            self.ledger_list.controls.append(ft.Text("No recent ledger activity", color=HMSColors.TEXT_SECONDARY, size=12))
+        else:
+            for entry in self.ledger_entries[:20]:
+                et = str(entry.get("event_type", "inventory.event"))
+                color = HMSColors.YELLOW
+                if "add" in et or "purchase" in et:
+                    color = HMSColors.GREEN
+                if "deduct" in et or "wastage" in et:
+                    color = HMSColors.RED
+                ts = str(entry.get("created_at", ""))[:19].replace("T", " ")
+                self.ledger_list.controls.append(
+                    activity_item(et, str(entry.get("description", "Stock activity")), ts, color)
+                )
+
+        for ctl in [self.items_list, self.alerts_list, self.snapshot_grid, self.ledger_list]:
+            try:
+                if ctl.page:
+                    ctl.update()
+            except Exception:
+                pass
 
     def _handle_add_product(self, e):
         """Add new product dialog with form fields."""

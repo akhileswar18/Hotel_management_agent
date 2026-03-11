@@ -2,7 +2,7 @@
 
 **Purpose**: Track errors encountered during development and their fixes for future reference.
 
-**Last Updated**: 2026-02-11
+**Last Updated**: 2026-03-11
 
 ---
 
@@ -298,6 +298,145 @@ ft.NavigationRail(destinations=[ft.NavigationRailDestination(...)])
 
 ---
 
+### 11. SyntaxError: unexpected indent in POS screen
+
+**File**: `src/ui/screens/pos_screen.py`
+
+**Error**:
+```python
+UI error: unexpected indent (pos_screen.py, line 449)
+```
+
+**Root Cause**: An extra leading space before `self._emit_kitchen_update(data)` broke Python block indentation inside payment finalization logic.
+
+**Solution**:
+```python
+# Wrong (extra leading space):
+ data = response.json()
+  self._emit_kitchen_update(data)
+
+# Correct:
+data = response.json()
+self._emit_kitchen_update(data)
+```
+
+**Files Modified**:
+- src/ui/screens/pos_screen.py (line 449)
+
+**Prevention**: Run a quick syntax check (`python -m py_compile`) after UI edits to catch indentation errors before launch.
+
+---
+
+### 12. Flet runtime error: Control must be added to the page first
+
+**File**: `src/ui/screens/kitchen_screen.py`
+
+**Error**:
+```python
+Kitchen: Control must be added to the page first.
+```
+
+**Root Cause**: Kitchen screen called `.update()` on child controls while detached from the page tree (during init / when Kitchen tab was not active).
+
+**Solution**:
+```python
+# Use attachment-safe refresh
+def _is_attached(self) -> bool:
+    return getattr(self.order_list, "page", None) is not None
+
+def _safe_refresh(self):
+    if self._is_attached():
+        self.update()
+```
+
+**Files Modified**:
+- src/ui/screens/kitchen_screen.py
+- src/ui/app.py
+
+**Prevention**: Avoid calling `.update()` on screen child controls unless they are mounted; use a guarded refresh helper.
+
+---
+
+### 13. OSError [Errno 10048]: Port already in use on launcher restart
+
+**File**: `src/launcher.py`
+
+**Error**:
+```python
+ERROR: [Errno 10048] ... bind on address ('127.0.0.1', 8000)
+ERROR: [Errno 10048] ... bind on address ('0.0.0.0', 8080)
+```
+
+**Root Cause**: `src/launcher.py` was run multiple times while an existing HMS process was already listening on ports `8000` and `8080`.
+
+**Solution**:
+- Added duplicate-instance guard in launcher startup:
+  - Check API/UI ports first.
+  - If both are already reachable, print existing instance info and exit cleanly.
+  - Skip duplicate bind attempts instead of crashing.
+
+**Files Modified**:
+- src/launcher.py
+
+**Prevention**:
+- Before re-running launcher, stop existing HMS process or let launcher exit gracefully when existing instance is detected.
+
+---
+
+### 14. TypeError: Container.__init__() got unexpected keyword argument 'ignore_interactions'
+
+**File**: `src/ui/screens/auth_screen.py`
+
+**Error**:
+```python
+Container.__init__() got an unexpected keyword argument 'ignore_interactions'
+```
+
+**Root Cause**: The installed Flet build does not support `ignore_interactions` on `ft.Container` (API mismatch with examples from newer versions).
+
+**Solution**:
+- Removed unsupported `ignore_interactions` usage.
+- Reordered `ft.Stack` children so the login card container is topmost and receives pointer events.
+
+**Files Modified**:
+- src/ui/screens/auth_screen.py
+
+**Prevention**:
+- Validate control constructor arguments against the installed Flet version before applying UI interaction props.
+
+---
+
+### 15. AttributeError: module 'flet' has no attribute 'Icons'
+
+**Files**: `src/ui/app.py`, `src/ui/components/ui_helpers.py`, `src/ui/screens/pos_screen.py`, `src/ui/screens/products_screen.py`, `src/ui/screens/receipt_screen.py`
+
+**Error**:
+```python
+module 'flet' has no attribute 'Icons'
+```
+
+**Root Cause**: Environment exposes `ft.icons` (lowercase) and does not provide `ft.Icons` (uppercase), so icon references using `ft.Icons.*` fail at runtime.
+
+**Solution**:
+- Reverted icon references from `ft.Icons.*` to `ft.icons.*` in all touched UI files.
+
+**Files Modified**:
+- src/ui/app.py
+- src/ui/components/ui_helpers.py
+- src/ui/screens/pos_screen.py
+- src/ui/screens/products_screen.py
+- src/ui/screens/receipt_screen.py
+
+**Prevention**:
+- Quick compatibility check before refactors:
+```python
+import flet as ft
+print(hasattr(ft, "Icons"), hasattr(ft, "icons"))
+```
+- Use the namespace that actually exists in the installed runtime.
+
+---
+
 ## Testing Results Summary
 
 | Component | Status | Notes |
@@ -306,7 +445,7 @@ ft.NavigationRail(destinations=[ft.NavigationRailDestination(...)])
 | **Database Seeding** | ✅ COMPLETE | 4 users, 10 items, 8 tables, stock created |
 | **API Server** | ✅ RUNNING | FastAPI on port 8000 |
 | **Flet UI** | ✅ RUNNING | All screens load, login screen visible at http://localhost:8080 |
-| **Flet UI Bugs Fixed** | ✅ FIXED | asyncio.run, Column padding, NavigationRailDestination, ButtonStyle |
+| **Flet UI Bugs Fixed** | ✅ FIXED | asyncio.run, Column padding, NavigationRailDestination, ButtonStyle, unexpected indent, detached-control update |
 | **Integration Tests** | ⚠️ Mixed | Some file locking issues on Windows |
 | **Smoke Tests** | ⚠️ Mixed | Same teardown issues |
 
@@ -330,6 +469,10 @@ ft.NavigationRail(destinations=[ft.NavigationRailDestination(...)])
 
 8. **NavigationRail vs NavigationBar**: Use `NavigationRailDestination` for `NavigationRail`, `NavigationDestination` for `NavigationBar`.
 
+9. **Python Indentation Discipline**: A single stray space can crash startup; run syntax checks for UI modules after manual edits.
+
+10. **Flet Attachment Lifecycle**: Controls may exist but still be detached; defer or guard `.update()` calls until mounted.
+
 ---
 
 ## Prevention Best Practices
@@ -343,6 +486,8 @@ ft.NavigationRail(destinations=[ft.NavigationRailDestination(...)])
 ✅ Never use asyncio.run() inside Flet (use sync httpx.Client)
 ✅ Use ft.Container for padding, not ft.Column
 ✅ Use NavigationRailDestination for NavigationRail
+✅ Run `python -m py_compile src/ui/screens/pos_screen.py` after manual edits
+✅ Guard `.update()` calls for off-screen/detached controls
 
 ---
 
@@ -358,4 +503,4 @@ All code is marked with `# TODO:` comments for Phase 2 work.
 
 ---
 
-**Status**: ✅ All Phase 1.5 critical errors resolved (10 total) | App running: API on :8000, UI on :8080
+**Status**: ✅ All Phase 1.5 critical errors resolved (12 total) | App running: API on :8000, UI on :8080

@@ -1,233 +1,249 @@
 """
 Login/Authentication Screen
 
-PIN-based login for staff. Minimal friction, large touch targets.
+Dark-themed role-first PIN login.
 """
 
 import flet as ft
 import httpx
+
 from src.ui.components.ui_helpers import (
-    HMSButton, NumericKeypad, HMSColors, show_error_dialog, show_error_toast
+    HMSButton,
+    NumericKeypad,
+    HMSColors,
+    tag_chip,
+    show_error_dialog,
+    show_error_toast,
 )
 
 
 class AuthScreen(ft.Column):
-    """Login screen with username and PIN input."""
+    """Role-first login with keypad PIN entry."""
+
+    ROLES = ["WAITER", "CASHIER", "MANAGER", "KITCHEN", "CLERK", "ADMIN"]
 
     def __init__(self, page: ft.Page, on_login_success):
-        self._page = page  # Store as _page to avoid conflict with Flet's read-only page property
+        self._page = page
         self.on_login_success = on_login_success
         self.api_base = "http://127.0.0.1:8000"
+        self.selected_role = "WAITER"
+        self.pin_value = ""
+        self.role_buttons = {}
 
-        # Username field
         self.username_field = ft.TextField(
             label="Username",
-            width=400,
-            height=56,
-            text_size=20,
-            autofocus=True,
+            value="waiter",
+            width=360,
+            height=48,
+            bgcolor=HMSColors.SURFACE2,
+            color=HMSColors.TEXT_PRIMARY,
+            border_color=HMSColors.BORDER,
         )
 
-        # PIN display (masked)
-        self.pin_display = ft.TextField(
-            label="PIN (4-6 digits)",
-            width=400,
-            height=56,
-            text_size=24,
-            text_align=ft.TextAlign.CENTER,
-            password=True,
-            read_only=True,
-        )
+        self.pin_dots = ft.Row(spacing=8, alignment=ft.MainAxisAlignment.CENTER)
+        self._render_pin_dots()
 
-        self.pin_value = ""  # Actual PIN (not displayed)
-
-        # Numeric keypad
         self.keypad = NumericKeypad(on_key_press=self._handle_keypad_press)
 
-        # Login button
         self.login_button = HMSButton(
-            "Login",
+            "Sign In",
             self._handle_login,
-            width=400,
-            color=HMSColors.SUCCESS,
+            width=360,
+            height=50,
+            color=HMSColors.ACCENT,
         )
-
         self.login_button.disabled = True
 
-        # Loading indicator
-        self.loading = ft.ProgressRing(visible=False)
-
-        # API status indicator
         self.api_status_text = ft.Text(
-            "Checking API connection...",
-            size=12,
+            "Checking API...",
+            size=11,
             color=HMSColors.TEXT_SECONDARY,
             text_align=ft.TextAlign.CENTER,
+        )
+        self.loading = ft.ProgressRing(visible=False, color=HMSColors.ACCENT)
+
+        role_grid = self._build_role_grid()
+
+        login_card = ft.Container(
+            width=520,
+            bgcolor=HMSColors.SURFACE,
+            border=ft.border.all(1, HMSColors.BORDER),
+            border_radius=16,
+            padding=24,
+            content=ft.Column(
+                [
+                    ft.Text("HMS", size=28, weight=ft.FontWeight.W_800, color=HMSColors.ACCENT, font_family="Syne"),
+                    ft.Text("Hotel Management System", size=13, color=HMSColors.TEXT_SECONDARY),
+                    ft.Container(height=8),
+                    role_grid,
+                    ft.Container(height=8),
+                    self.username_field,
+                    ft.Text("PIN", size=12, color=HMSColors.TEXT_SECONDARY),
+                    self.pin_dots,
+                    self.keypad,
+                    ft.Row([self.login_button, self.loading], spacing=12, alignment=ft.MainAxisAlignment.CENTER),
+                    self.api_status_text,
+                ],
+                spacing=10,
+                horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+            ),
+        )
+
+        offline_badge = ft.Container(
+            padding=ft.padding.symmetric(horizontal=10, vertical=6),
+            bgcolor=HMSColors.GREEN_DIM,
+            border=ft.border.all(1, HMSColors.GREEN + "60"),
+            border_radius=8,
+            content=ft.Row(
+                [
+                    ft.Container(width=8, height=8, bgcolor=HMSColors.GREEN, border_radius=8),
+                    ft.Text("OFFLINE READY", size=11, color=HMSColors.GREEN, font_family="DM Mono"),
+                ],
+                spacing=6,
+                tight=True,
+            ),
         )
 
         super().__init__(
             [
-                ft.Container(height=20),
-                ft.Text(
-                    "Hotel Management System",
-                    size=28,
-                    weight="bold",
-                    text_align=ft.TextAlign.CENTER,
-                ),
-                ft.Text(
-                    "Phase 1 - Point of Sale",
-                    size=16,
-                    color=HMSColors.TEXT_SECONDARY,
-                    text_align=ft.TextAlign.CENTER,
-                ),
-                ft.Container(height=40),
-                ft.Text("Username", size=16, weight="bold"),
-                self.username_field,
-                ft.Container(height=10),
-                ft.Text("PIN Code", size=16, weight="bold"),
-                self.pin_display,
-                ft.Container(height=10),
-                self.keypad,
-                ft.Container(height=20),
-                ft.Row(
-                    [
-                        self.login_button,
-                        self.loading,
-                    ],
-                    alignment=ft.MainAxisAlignment.CENTER,
-                    spacing=20,
-                ),
-                self.api_status_text,
+                ft.Container(
+                    expand=True,
+                    alignment=ft.alignment.center,
+                    content=ft.Stack(
+                        [
+                            ft.Container(
+                                expand=True,
+                                gradient=ft.LinearGradient(
+                                    begin=ft.alignment.top_left,
+                                    end=ft.alignment.bottom_right,
+                                    colors=[HMSColors.BG, "#101828", "#0A0F1A"],
+                                ),
+                            ),
+                            ft.Container(
+                                alignment=ft.alignment.top_right,
+                                padding=20,
+                                content=offline_badge,
+                            ),
+                            ft.Container(expand=True, alignment=ft.alignment.center, content=login_card),
+                        ],
+                        expand=True,
+                    ),
+                )
             ],
-            alignment=ft.MainAxisAlignment.START,
-            horizontal_alignment=ft.CrossAxisAlignment.CENTER,
-            spacing=10,
             expand=True,
+            spacing=0,
         )
 
-        # Check API health on load
         self._check_api_health()
 
-    def _handle_keypad_press(self, key: str):
-        """Handle numeric keypad input."""
-        if key == "CLR":
-            # Clear all
-            self.pin_value = ""
-            self.pin_display.value = ""
-        elif key == "⌫":
-            # Backspace
-            if self.pin_value:
-                self.pin_value = self.pin_value[:-1]
-                self.pin_display.value = "*" * len(self.pin_value)
-        elif key.isdigit():
-            # Add digit
-            if len(self.pin_value) < 6:
-                self.pin_value += key
-                self.pin_display.value = "*" * len(self.pin_value)
+    def _build_role_grid(self) -> ft.Control:
+        rows = []
+        for i in range(0, len(self.ROLES), 3):
+            row_controls = []
+            for role in self.ROLES[i : i + 3]:
+                chip = ft.Container(
+                    content=tag_chip(role.title(), HMSColors.SURFACE2, HMSColors.TEXT_SECONDARY),
+                    on_click=lambda e, r=role: self._select_role(r),
+                )
+                self.role_buttons[role] = chip
+                row_controls.append(chip)
+            rows.append(ft.Row(row_controls, spacing=8, alignment=ft.MainAxisAlignment.CENTER))
+        self._sync_role_chips()
+        return ft.Column(rows, spacing=8)
 
-        # Enable login button if PIN is 4-6 digits
+    def _select_role(self, role: str):
+        self.selected_role = role
+        self._sync_role_chips()
+        # Keep login convenient for default users.
+        self.username_field.value = role.lower()
+        self.username_field.update()
+
+    def _sync_role_chips(self):
+        for role, container in self.role_buttons.items():
+            active = role == self.selected_role
+            container.content = tag_chip(
+                role.title(),
+                HMSColors.ACCENT if active else HMSColors.SURFACE2,
+                HMSColors.TEXT_LIGHT if active else HMSColors.TEXT_SECONDARY,
+            )
+            if container.page:
+                container.update()
+
+    def _render_pin_dots(self):
+        self.pin_dots.controls = []
+        for i in range(6):
+            filled = i < len(self.pin_value)
+            self.pin_dots.controls.append(
+                ft.Container(
+                    width=12,
+                    height=12,
+                    border_radius=10,
+                    bgcolor=HMSColors.ACCENT if filled else HMSColors.SURFACE3,
+                    border=ft.border.all(1, HMSColors.ACCENT if filled else HMSColors.BORDER),
+                )
+            )
+
+    def _handle_keypad_press(self, key: str):
+        if key == "CLR":
+            self.pin_value = ""
+        elif key == "⌫":
+            self.pin_value = self.pin_value[:-1]
+        elif key.isdigit() and len(self.pin_value) < 6:
+            self.pin_value += key
+
         self.login_button.disabled = not (4 <= len(self.pin_value) <= 6)
-        self.pin_display.update()
+        self._render_pin_dots()
+        self.pin_dots.update()
         self.login_button.update()
 
     def _check_api_health(self):
-        """Check if API server is available."""
         try:
             with httpx.Client(timeout=2.0) as client:
                 response = client.get(f"{self.api_base}/health")
                 if response.status_code == 200:
-                    self.api_status_text.value = "✓ API connected"
-                    self.api_status_text.color = HMSColors.SUCCESS
+                    self.api_status_text.value = "API connected"
+                    self.api_status_text.color = HMSColors.GREEN
                 else:
-                    self.api_status_text.value = "⚠ API returned error"
-                    self.api_status_text.color = HMSColors.WARNING
-        except httpx.ConnectError:
-            self.api_status_text.value = "✗ API server not running — please start backend"
-            self.api_status_text.color = HMSColors.ERROR
-        except httpx.TimeoutException:
-            self.api_status_text.value = "⚠ API timeout — server may be slow"
-            self.api_status_text.color = HMSColors.WARNING
-        except Exception as ex:
-            self.api_status_text.value = f"⚠ API check failed: {type(ex).__name__}"
-            self.api_status_text.color = HMSColors.WARNING
-        
-        try:
-            self.api_status_text.update()
+                    self.api_status_text.value = "API unavailable"
+                    self.api_status_text.color = HMSColors.YELLOW
         except Exception:
-            pass  # Page might not be mounted yet
+            self.api_status_text.value = "API server not reachable"
+            self.api_status_text.color = HMSColors.RED
+        if self.api_status_text.page:
+            self.api_status_text.update()
 
     def _handle_login(self, e):
-        """Handle login button click."""
-        username = self.username_field.value.strip()
+        username = (self.username_field.value or "").strip()
         pin = self.pin_value
 
         if not username:
             show_error_dialog(self._page, "Error", "Please enter username")
             return
-
         if not (4 <= len(pin) <= 6):
             show_error_dialog(self._page, "Error", "PIN must be 4-6 digits")
             return
 
-        # Show loading
         self.loading.visible = True
         self.login_button.disabled = True
         self._page.update()
 
         try:
-            with httpx.Client(timeout=10.0) as client:  # Increased timeout
+            with httpx.Client(timeout=10.0) as client:
                 response = client.post(
                     f"{self.api_base}/api/auth/login",
                     json={"username": username, "pin": pin},
                 )
-
                 if response.status_code == 200:
-                    user_data = response.json()
-                    self.loading.visible = False
-                    self.login_button.disabled = False
-                    self._page.update()
-                    # Trigger success callback
-                    self.on_login_success(user_data)
-                else:
-                    error_data = response.json()
-                    error_msg = error_data.get("detail", "Invalid credentials")
-                    show_error_dialog(
-                        self._page,
-                        "Login Failed",
-                        error_msg
-                    )
-                    show_error_toast(self._page, f"Login failed: {error_msg}")
-        except httpx.ConnectError:
-            error_msg = "Cannot connect to API server.\n\nPlease ensure the backend is running:\n1. Run 'python -m src.launcher' (starts both API + UI)\n2. Or run 'python -m src' in a separate terminal for API only\n\nAPI should be available at http://127.0.0.1:8000"
-            show_error_dialog(
-                self._page,
-                "API Server Not Running",
-                error_msg
-            )
-            show_error_toast(self._page, "API server not running - check console")
-            self._check_api_health()  # Refresh status
-        except httpx.TimeoutException:
-            error_msg = "Request timed out. The API server may be slow or unresponsive."
-            show_error_dialog(
-                self._page,
-                "Timeout Error",
-                error_msg
-            )
-            show_error_toast(self._page, "Login request timed out")
+                    self.on_login_success(response.json())
+                    return
+                detail = response.json().get("detail", "Invalid credentials")
+                show_error_dialog(self._page, "Login Failed", str(detail))
+                show_error_toast(self._page, "Login failed")
         except Exception as ex:
-            error_msg = f"Unexpected error: {str(ex)}"
-            show_error_dialog(
-                self._page,
-                "Error",
-                error_msg
-            )
-            show_error_toast(self._page, f"Error: {type(ex).__name__}")
+            show_error_dialog(self._page, "Error", str(ex))
+            show_error_toast(self._page, "Login failed")
+            self._check_api_health()
         finally:
             self.loading.visible = False
             self.login_button.disabled = False
             self._page.update()
-
-
-# TODO: Add offline login (cache credentials)
-# TODO: Add "forgot PIN" recovery
-# TODO: Add session management

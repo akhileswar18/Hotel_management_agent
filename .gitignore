@@ -4,6 +4,7 @@
 .env
 .env.local
 .env.*.local
+.env*
 
 # Database files
 *.db
@@ -19,11 +20,13 @@ hms.db
 # Python
 __pycache__/
 *.py[cod]
+*.pyc
 *$py.class
 *.so
 .Python
 env/
 venv/
+.venv/
 ENV/
 build/
 develop-eggs/
@@ -95,6 +98,7 @@ docker-compose.override.yml
 hms_dev.db
 test_*.db
 tmpclaude-*
+*.tmp
 
 # Receipts output
 receipts/

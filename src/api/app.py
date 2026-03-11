@@ -9,9 +9,10 @@ from fastapi import FastAPI, HTTPException, status, Body, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 from datetime import datetime, date
 from uuid import UUID, uuid4
+import json
 
 from src.application import AuthService, SalesService, InventoryService, ReportingService
 from src.domain import Money, PaymentMethod
@@ -27,6 +28,8 @@ from src.agents.reporting_agent import ReportingAgent
 from src.agents.inventory_agent import InventoryAgent
 from src.agents.insight_agent import InsightAgent
 from src.agents.orchestrator_agent import OrchestratorAgent
+from src.agents.watchdog_agent import WatchdogAgent
+from src.infrastructure.database import get_db
 
 
 # ===== Request/Response Models =====
@@ -127,6 +130,11 @@ class HoldResumeRequest(BaseModel):
     user_id: Optional[str] = None
 
 
+class KitchenStatusUpdateRequest(BaseModel):
+    """Update kitchen workflow status for an order."""
+    kitchen_status: str
+
+
 class LineItemResponse(BaseModel):
     """Line item response model."""
     id: str
@@ -159,6 +167,7 @@ class OrderResponse(BaseModel):
     discount_amount: float
     tax_amount: float
     total_amount: float
+    kitchen_status: str = "PENDING"
     receipt_number: Optional[str]
     finalized_at: Optional[str]
     line_items: List[LineItemResponse] = []
@@ -184,14 +193,16 @@ def _resolve_user_id(request_user_id: Optional[str]) -> UUID:
 
 def _order_to_response(order) -> OrderResponse:
     """Convert Order domain entity to API response."""
+    order_id = str(order.id)
     return OrderResponse(
-        id=str(order.id),
+        id=order_id,
         table_id=order.table_id,
         status=order.status.value,
         subtotal=order.subtotal.to_float(),
         discount_amount=order.discount_amount.to_float(),
         tax_amount=order.tax_amount.to_float(),
         total_amount=order.total_amount.to_float(),
+        kitchen_status=_get_kitchen_status(order_id),
         receipt_number=order.receipt_number,
         finalized_at=order.finalized_at.isoformat() if order.finalized_at else None,
         line_items=[
@@ -210,14 +221,19 @@ def _order_to_response(order) -> OrderResponse:
 
 def _event_payload_to_response(payload: dict) -> OrderResponse:
     """Convert an event payload dict (from OrderAgent) back to an OrderResponse."""
+    order_id = payload.get("order_id", "")
+    kitchen_status = payload.get("kitchen_status")
+    if not kitchen_status and order_id:
+        kitchen_status = _get_kitchen_status(order_id)
     return OrderResponse(
-        id=payload.get("order_id", ""),
+        id=order_id,
         table_id=payload.get("table_id") or None,
         status=payload.get("status", ""),
         subtotal=payload.get("subtotal", 0.0),
         discount_amount=payload.get("discount_amount", 0.0),
         tax_amount=payload.get("tax_amount", 0.0),
         total_amount=payload.get("total_amount", 0.0),
+        kitchen_status=kitchen_status or "PENDING",
         receipt_number=payload.get("receipt_number") or None,
         finalized_at=payload.get("finalized_at"),
         line_items=[
@@ -232,6 +248,53 @@ def _event_payload_to_response(payload: dict) -> OrderResponse:
             for li in payload.get("line_items", [])
         ],
     )
+
+
+def _get_kitchen_status(order_id: str) -> str:
+    """Fetch kitchen_status from DB with safe fallback for legacy rows."""
+    try:
+        conn = get_db()
+        row = conn.execute(
+            "SELECT kitchen_status FROM orders WHERE id = ?",
+            (order_id,),
+        ).fetchone()
+        if row and row["kitchen_status"]:
+            return str(row["kitchen_status"]).upper()
+    except Exception:
+        pass
+    return "PENDING"
+
+
+def _parse_json_safe(raw_text: Optional[str]) -> Any:
+    """Parse JSON text safely; return raw text if parsing fails."""
+    if raw_text in (None, ""):
+        return None
+    try:
+        return json.loads(raw_text)
+    except Exception:
+        return raw_text
+
+
+def _audit_row_to_payload(row) -> dict:
+    """Normalize audit_log row to the UI-facing event payload."""
+    entity_type = str(row["entity_type"]).lower()
+    operation = str(row["operation"]).lower()
+    event_type = f"{entity_type}.{operation}"
+    description = row["reason"] or f"{row['operation']} {row['entity_type']} {row['entity_id']}"
+    return {
+        "id": str(row["id"]),
+        "event_type": event_type,
+        "description": str(description),
+        "user_id": str(row["user_id"]),
+        "created_at": str(row["timestamp"]),
+        "metadata": {
+            "entity_type": row["entity_type"],
+            "entity_id": row["entity_id"],
+            "operation": row["operation"],
+            "old_state": _parse_json_safe(row["old_state"]),
+            "new_state": _parse_json_safe(row["new_state"]),
+        },
+    }
 
 
 def _publish_order_event(event_bus: "EventBus", event: Event) -> OrderResponse:
@@ -311,12 +374,13 @@ def create_app() -> FastAPI:
     reporting_agent = ReportingAgent()
     insight_agent = InsightAgent()
     orchestrator_agent = OrchestratorAgent(event_bus=event_bus)
+    watchdog_agent = WatchdogAgent(event_bus=event_bus)
 
     # Register all agents with the registry
     all_agents = [
         order_agent, audit_agent, inventory_agent, payment_agent,
         auth_agent, print_agent, notification_agent, reporting_agent,
-        insight_agent, orchestrator_agent,
+        insight_agent, orchestrator_agent, watchdog_agent,
     ]
     for agent in all_agents:
         registry.register(agent)
@@ -409,6 +473,26 @@ def create_app() -> FastAPI:
     async def get_current_user() -> dict:
         """Get current user info (from session/token)."""
         return {"user_id": "current_user_id"}
+
+    @app.get("/api/audit/log")
+    async def get_audit_log(limit: int = 50, offset: int = 0) -> List[dict]:
+        """List normalized audit events for dashboard and AI event feeds."""
+        try:
+            safe_limit = max(1, min(int(limit), 500))
+            safe_offset = max(0, int(offset))
+            conn = get_db()
+            rows = conn.execute(
+                """
+                SELECT id, entity_type, entity_id, operation, user_id, timestamp, old_state, new_state, reason
+                FROM audit_log
+                ORDER BY timestamp DESC
+                LIMIT ? OFFSET ?
+                """,
+                (safe_limit, safe_offset),
+            ).fetchall()
+            return [_audit_row_to_payload(row) for row in rows]
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=str(e))
 
     # ===== User Management Routes (Manager Only) =====
     @app.get("/api/users")
@@ -677,6 +761,37 @@ def create_app() -> FastAPI:
         except Exception as e:
             raise HTTPException(status_code=400, detail=str(e))
 
+    @app.patch("/api/sales/orders/{order_id}/kitchen-status")
+    async def update_kitchen_status(order_id: str, request: KitchenStatusUpdateRequest) -> OrderResponse:
+        """Update additive kitchen_status metadata for an order."""
+        allowed = {"PENDING", "COOKING", "READY", "SERVED"}
+        requested = (request.kitchen_status or "").upper().strip()
+        if requested not in allowed:
+            raise HTTPException(status_code=400, detail=f"Invalid kitchen_status. Allowed: {', '.join(sorted(allowed))}")
+
+        try:
+            conn = get_db()
+            exists = conn.execute("SELECT id FROM orders WHERE id = ?", (order_id,)).fetchone()
+            if not exists:
+                raise HTTPException(status_code=404, detail="Order not found")
+
+            now = datetime.utcnow().isoformat() + "Z"
+            conn.execute(
+                "UPDATE orders SET kitchen_status = ?, updated_at = ? WHERE id = ?",
+                (requested, now, order_id),
+            )
+            conn.commit()
+
+            sales_service = SalesService()
+            order = sales_service.get_order(UUID(order_id))
+            if not order:
+                raise HTTPException(status_code=404, detail="Order not found")
+            return _order_to_response(order)
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=str(e))
+
     @app.get("/api/receipts/{receipt_number}")
     async def get_receipt(receipt_number: str) -> dict:
         """Get receipt/order data by receipt number (for digital receipt link)."""
@@ -703,6 +818,59 @@ def create_app() -> FastAPI:
             return [_order_to_response(o) for o in orders]
         except Exception as e:
             raise HTTPException(status_code=400, detail=str(e))
+
+    class FromIntentRequest(BaseModel):
+        """Execute a pre-parsed create_order intent (after user confirmation)."""
+        intent: Dict[str, Any]
+        user_id: str = ""
+
+    @app.post("/api/orders/from-intent")
+    async def create_order_from_intent(request: FromIntentRequest):
+        """Create order from a pre-parsed intent. Used after ChatOrderScreen confirmation."""
+        intent = request.intent
+        if intent.get("action") != "create_order":
+            raise HTTPException(
+                status_code=400,
+                detail="Only create_order intents are accepted. Got: " + str(intent.get("action")),
+            )
+        items = intent.get("items") or []
+        if not items:
+            raise HTTPException(status_code=400, detail="Intent must contain at least one item.")
+        table_id = intent.get("table_id") or "1"
+        try:
+            event = Event.create(
+                type="workflow.multi_step",
+                source="FromIntent",
+                payload={"intent": intent},
+                user_id=request.user_id or None,
+            )
+            result = event_bus.publish_sync(event)
+            if not result.success or not result.event:
+                return {
+                    "status": "error",
+                    "message": result.error or "Failed to create order",
+                }
+            evt_type = result.event.type or ""
+            if evt_type == "workflow.failed" or evt_type.endswith(".error"):
+                err_msg = result.event.payload.get("error", "Workflow step failed")
+                return {"status": "error", "message": f"Order failed: {err_msg}"}
+            payload_result = result.event.payload
+            order_id = payload_result.get("order_id", "")
+            items_desc = ", ".join(
+                f"{i.get('name', '?')} x{i.get('quantity', 1)}" for i in items
+            )
+            msg = f"Order created for table {table_id}"
+            if items_desc:
+                msg += f" with {items_desc}"
+            msg += "!"
+            return {
+                "status": "success",
+                "order_id": order_id,
+                "result": payload_result,
+                "message": msg,
+            }
+        except Exception as e:
+            return {"status": "error", "message": str(e)}
 
     # ===== Inventory Routes =====
     @app.get("/api/inventory/items")
@@ -915,6 +1083,17 @@ def create_app() -> FastAPI:
         except Exception as e:
             raise HTTPException(status_code=400, detail=str(e))
 
+    @app.post("/api/reports/close-day")
+    async def close_day(report_date: str = "") -> dict:
+        """Close day: generate daily summary and optionally persist. Returns summary for display."""
+        try:
+            reporting_service = ReportingService()
+            target_date = date.today() if not report_date else date.fromisoformat(report_date)
+            summary = reporting_service.daily_sales_summary(target_date)
+            return {"status": "ok", "summary": summary, "closed_at": datetime.utcnow().isoformat()}
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=str(e))
+
     # ===== Insights (InsightAgent — LLM advisory, read-only) =====
     @app.get("/api/insights/upsell/{order_id}")
     async def get_upsell_suggestions(order_id: str) -> dict:
@@ -958,18 +1137,31 @@ def create_app() -> FastAPI:
             stt = SpeechToText()
             tts = TextToSpeech()
             parser = IntentParser()
+            preferred_language = parser.primary_language
 
             while True:
                 data = await websocket.receive_bytes()
                 transcript = stt.transcribe(data)
                 if not transcript:
-                    await websocket.send_json({"type": "error", "message": "Could not transcribe audio"})
+                    await websocket.send_json({
+                        "type": "error",
+                        "message": "Could not transcribe audio",
+                        "language": preferred_language,
+                    })
                     continue
 
-                await websocket.send_json({"type": "transcript", "text": transcript})
+                await websocket.send_json({
+                    "type": "transcript",
+                    "text": transcript,
+                    "language": preferred_language,
+                })
 
-                intent = parser.parse(transcript)
-                await websocket.send_json({"type": "intent", "intent": intent})
+                intent = parser.parse(transcript, language=preferred_language)
+                await websocket.send_json({
+                    "type": "intent",
+                    "intent": intent,
+                    "language": preferred_language,
+                })
 
                 if intent.get("action") == "create_order" and intent.get("items"):
                     event = Event.create(
@@ -979,19 +1171,85 @@ def create_app() -> FastAPI:
                     )
                     result = event_bus.publish_sync(event)
                     if result.success and result.event:
-                        await websocket.send_json({"type": "result", "payload": result.event.payload})
+                        await websocket.send_json({
+                            "type": "result",
+                            "payload": result.event.payload,
+                            "language": preferred_language,
+                        })
                     else:
-                        await websocket.send_json({"type": "error", "message": result.error or "Workflow failed"})
+                        await websocket.send_json({
+                            "type": "error",
+                            "message": result.error or "Workflow failed",
+                            "language": preferred_language,
+                        })
                 else:
-                    await websocket.send_json({"type": "info", "message": f"Intent: {intent.get('action', 'unknown')}"})
+                    await websocket.send_json({
+                        "type": "info",
+                        "message": f"Intent: {intent.get('action', 'unknown')}",
+                        "language": preferred_language,
+                    })
         except Exception:
             pass  # WebSocket closed
+
+    # ===== Voice Parse (parse only, no execution — for ChatOrderScreen confirm flow) =====
+    class ParseRequest(BaseModel):
+        text: str
+        pending_intent: Optional[Dict[str, Any]] = None
+        preferred_language: Optional[str] = None
+
+    @app.post("/api/voice/parse")
+    async def parse_command(request: ParseRequest):
+        """Parse natural language into intent only. No execution. For confirmation flow."""
+        try:
+            from src.voice.intent_parser import IntentParser
+            parser = IntentParser()
+            preferred_language = request.preferred_language or parser.primary_language
+            if request.pending_intent:
+                intent = parser.parse_followup(
+                    request.pending_intent, request.text, language=preferred_language
+                )
+            else:
+                intent = parser.parse(request.text, language=preferred_language)
+            action = intent.get("action", "unknown")
+            parsed_by = intent.pop("_parsed_by", "rules")
+            if action == "unknown":
+                return {
+                    "status": "error",
+                    "message": "Sorry, couldn't understand. Try again or use the menu buttons.",
+                    "intent": intent,
+                    "parsed_by": parsed_by,
+                    "language": preferred_language,
+                }
+            missing = parser.get_missing_fields(intent)
+            if missing:
+                prompt = parser.get_followup_prompt(intent, language=preferred_language)
+                return {
+                    "status": "followup",
+                    "intent": intent,
+                    "missing_fields": missing,
+                    "message": prompt,
+                    "parsed_by": parsed_by,
+                    "language": preferred_language,
+                }
+            return {
+                "status": "ok",
+                "intent": intent,
+                "parsed_by": parsed_by,
+                "language": preferred_language,
+            }
+        except Exception as e:
+            return {
+                "status": "error",
+                "message": "Sorry, couldn't understand. Try again or use the menu buttons.",
+                "detail": str(e),
+            }
 
     # ===== Text Command (voice-equivalent without audio) =====
     class TextCommandRequest(BaseModel):
         text: str
         user_id: str = ""
-        pending_intent: dict = None  # For follow-up conversation context
+        pending_intent: Optional[Dict[str, Any]] = None  # For follow-up conversation context
+        preferred_language: Optional[str] = None
 
     @app.post("/api/voice/text-command")
     async def text_command(request: TextCommandRequest):
@@ -1001,12 +1259,15 @@ def create_app() -> FastAPI:
         try:
             from src.voice.intent_parser import IntentParser
             parser = IntentParser()
+            preferred_language = request.preferred_language or parser.primary_language
 
             # If there's a pending intent, merge the follow-up answer
             if request.pending_intent:
-                intent = parser.parse_followup(request.pending_intent, request.text)
+                intent = parser.parse_followup(
+                    request.pending_intent, request.text, language=preferred_language
+                )
             else:
-                intent = parser.parse(request.text)
+                intent = parser.parse(request.text, language=preferred_language)
 
             action = intent.get("action", "unknown")
             parsed_by = intent.pop("_parsed_by", "rules")  # Extract and remove internal marker
@@ -1014,13 +1275,14 @@ def create_app() -> FastAPI:
             # Check for missing required fields → ask follow-up
             missing = parser.get_missing_fields(intent)
             if missing:
-                prompt = parser.get_followup_prompt(intent)
+                prompt = parser.get_followup_prompt(intent, language=preferred_language)
                 return {
                     "status": "followup",
                     "intent": intent,
                     "missing_fields": missing,
                     "message": prompt,
                     "parsed_by": parsed_by,
+                    "language": preferred_language,
                 }
 
             # --- Execute the command based on action ---

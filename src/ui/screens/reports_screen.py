@@ -1,534 +1,345 @@
 """
 Reports Screen
 
-Daily sales summary, inventory snapshot, date filtering, and CSV export.
+Visual analytics with primitive bar/progress charts (no new dependencies).
 """
 
 import csv
-import io
+from datetime import date, timedelta
+from typing import Dict, List
+
 import flet as ft
 import httpx
-from datetime import datetime, date, timedelta
+
 from src.ui.components.ui_helpers import (
-    HMSButton, HMSColors, show_error_dialog, show_success_dialog, create_header,
-    RefreshButton,
+    HMSButton,
+    HMSColors,
+    build_header,
+    stat_card,
+    section_header,
+    show_error_dialog,
+    show_success_dialog,
 )
 
 
 class ReportsScreen(ft.Column):
-    """Reports and analytics screen."""
+    """Reports and analytics dashboard."""
 
     def __init__(self, page: ft.Page, user_info: dict, on_back):
         self._page = page
         self.user_info = user_info
         self.on_back = on_back
         self.api_base = "http://127.0.0.1:8000"
-        self._sales_data = {}
-        self._inventory_data = {}
         self._selected_date = date.today()
 
-        header = create_header(page, "Reports & Analytics", user_info.get("username"))
+        self._sales_data: Dict = {}
+        self._inventory_data: Dict = {}
+        self._yesterday_sales_data: Dict = {}
 
-        # Date filter row
-        self.date_display = ft.Text(
-            self._selected_date.strftime("%A, %B %d, %Y"),
-            size=16, weight="bold",
-        )
-
-        prev_day_btn = ft.IconButton(
-            icon=ft.icons.CHEVRON_LEFT,
-            tooltip="Previous day",
-            on_click=self._handle_prev_day,
-        )
-        next_day_btn = ft.IconButton(
-            icon=ft.icons.CHEVRON_RIGHT,
-            tooltip="Next day",
-            on_click=self._handle_next_day,
-        )
-        today_btn = HMSButton(
-            "Today",
-            self._handle_today,
-            width=80,
-            color=HMSColors.PRIMARY,
-        )
-        self.date_input = ft.TextField(
-            label="Date (YYYY-MM-DD)",
-            hint_text="e.g. 2026-02-11",
-            width=180,
-            height=48,
-            text_size=14,
-            value=self._selected_date.isoformat(),
-            on_submit=self._handle_date_input,
-        )
-        go_btn = HMSButton(
-            "Go",
-            self._handle_date_input,
-            width=60,
-            color=HMSColors.PRIMARY,
-        )
-
-        date_row = ft.Row(
-            [
-                prev_day_btn,
-                self.date_display,
-                next_day_btn,
-                ft.Container(width=20),
-                today_btn,
-                ft.Container(width=20),
-                self.date_input,
-                go_btn,
-            ],
-            spacing=5,
-            alignment=ft.MainAxisAlignment.START,
-            vertical_alignment=ft.CrossAxisAlignment.CENTER,
-        )
-
-        # Sales summary section
-        self.sales_summary = ft.Card(
-            content=ft.Container(
-                content=ft.Column(
-                    [
-                        ft.Text("Daily Sales Summary", size=18, weight="bold"),
-                        ft.Text("Loading...", size=14, color=HMSColors.TEXT_SECONDARY),
-                    ],
-                    spacing=10,
-                ),
-                padding=20,
-            ),
-            margin=10,
-        )
-
-        # Inventory snapshot section
-        self.inventory_summary = ft.Card(
-            content=ft.Container(
-                content=ft.Column(
-                    [
-                        ft.Text("Inventory Status", size=18, weight="bold"),
-                        ft.Text("Loading...", size=14, color=HMSColors.TEXT_SECONDARY),
-                    ],
-                    spacing=10,
-                ),
-                padding=20,
-            ),
-            margin=10,
-        )
-
-        # Transaction search section
-        self.txn_method_filter = ft.Dropdown(
-            label="Payment Method",
-            options=[
-                ft.dropdown.Option("", "All Methods"),
-                ft.dropdown.Option("CASH", "Cash"),
-                ft.dropdown.Option("CARD", "Card"),
-                ft.dropdown.Option("VOUCHER", "Voucher"),
-            ],
-            value="",
-            width=160,
-        )
-
-        self.txn_start_date = ft.TextField(
-            label="Start Date",
-            hint_text="YYYY-MM-DD",
-            width=150,
-            height=48,
-            text_size=14,
-        )
-
-        self.txn_end_date = ft.TextField(
-            label="End Date",
-            hint_text="YYYY-MM-DD",
-            width=150,
-            height=48,
-            text_size=14,
-        )
-
-        txn_search_btn = HMSButton(
-            "Search Transactions",
-            self._handle_txn_search,
-            color=HMSColors.PRIMARY,
-        )
-
-        self.txn_results_list = ft.ListView(spacing=5, height=250)
-        self.txn_count_text = ft.Text("", size=13, color=HMSColors.TEXT_SECONDARY)
-
-        self.transaction_section = ft.Card(
-            content=ft.Container(
-                content=ft.Column(
-                    [
-                        ft.Text("Transaction Search", size=18, weight="bold"),
-                        ft.Row([
-                            self.txn_start_date,
-                            self.txn_end_date,
-                            self.txn_method_filter,
-                            txn_search_btn,
-                        ], spacing=10, wrap=True),
-                        self.txn_count_text,
-                        self.txn_results_list,
-                    ],
-                    spacing=10,
-                ),
-                padding=20,
-            ),
-            margin=10,
-        )
-
-        # Standardized Refresh button (replaces ad-hoc HMSButton)
-        self.refresh_button = RefreshButton(
-            on_refresh=self._load_reports,
-            page=self._page,
-            tooltip="Refresh reports",
-        )
-
-        export_sales_button = HMSButton(
-            "Export Sales CSV",
-            self._handle_export_sales,
-            color=HMSColors.SUCCESS,
-        )
-
-        export_inv_button = HMSButton(
-            "Export Inventory CSV",
-            self._handle_export_inventory,
-            color=HMSColors.SUCCESS,
-        )
-
-        back_button = HMSButton(
-            "Back to POS",
-            lambda e: on_back(),
-        )
-
-        self.loading = ft.ProgressRing(visible=False)
+        self.date_text = ft.Text("", size=14, color=HMSColors.TEXT_SECONDARY)
+        self.stats_row = ft.Row(spacing=12, wrap=True)
+        self.hourly_chart = ft.Row(height=150, spacing=8, alignment=ft.MainAxisAlignment.END)
+        self.payment_rows = ft.Column(spacing=10)
+        self.top_items_rows = ft.Column(spacing=8)
+        self.inventory_snapshot_grid = ft.Row(spacing=8, wrap=True)
 
         super().__init__(
             [
-                ft.Row(
-                    [
-                        ft.Text("Reports", size=20, weight="bold"),
-                        ft.Container(expand=True),
-                        self.refresh_button,
-                        export_sales_button,
-                        export_inv_button,
-                        back_button,
-                    ],
-                    spacing=10,
+                build_header("Reports", user_info),
+                ft.Container(
+                    expand=True,
+                    padding=16,
+                    content=ft.Column(
+                        [
+                            self._build_top_controls(),
+                            self.stats_row,
+                            ft.Row(
+                                [
+                                    self._surface_card(
+                                        ft.Column([section_header("Hourly Revenue (Today vs Yesterday)"), self.hourly_chart], spacing=8),
+                                        expand=1,
+                                    ),
+                                    self._surface_card(
+                                        ft.Column([section_header("Payment Breakdown"), self.payment_rows], spacing=8),
+                                        expand=1,
+                                    ),
+                                ],
+                                spacing=12,
+                                expand=True,
+                            ),
+                            ft.Row(
+                                [
+                                    self._surface_card(
+                                        ft.Column([section_header("Top 5 Items"), self.top_items_rows], spacing=8),
+                                        expand=1,
+                                    ),
+                                    self._surface_card(
+                                        ft.Column([section_header("Inventory Snapshot"), self.inventory_snapshot_grid], spacing=8),
+                                        expand=1,
+                                    ),
+                                ],
+                                spacing=12,
+                                expand=True,
+                            ),
+                        ],
+                        spacing=12,
+                        expand=True,
+                    ),
                 ),
-                ft.Divider(),
-                date_row,
-                ft.Divider(),
-                self.sales_summary,
-                self.inventory_summary,
-                self.transaction_section,
-                ft.Row([self.loading], alignment=ft.MainAxisAlignment.CENTER),
             ],
-            spacing=10,
+            spacing=0,
             expand=True,
         )
 
-        # Load reports
         self._load_reports()
+        self._render()
 
-    def _set_date(self, new_date: date):
-        """Update selected date and refresh."""
-        self._selected_date = new_date
-        self.date_display.value = new_date.strftime("%A, %B %d, %Y")
-        self.date_input.value = new_date.isoformat()
-        self._load_reports()
-        try:
-            self._page.update()
-        except Exception:
-            pass
+    def _surface_card(self, content: ft.Control, expand: int = 0) -> ft.Container:
+        return ft.Container(
+            expand=expand,
+            bgcolor=HMSColors.SURFACE,
+            border=ft.border.all(1, HMSColors.BORDER),
+            border_radius=12,
+            padding=14,
+            content=content,
+        )
 
-    def _handle_prev_day(self, e):
-        self._set_date(self._selected_date - timedelta(days=1))
-
-    def _handle_next_day(self, e):
-        self._set_date(self._selected_date + timedelta(days=1))
-
-    def _handle_today(self, e):
-        self._set_date(date.today())
-
-    def _handle_date_input(self, e):
-        val = self.date_input.value.strip()
-        try:
-            parsed = date.fromisoformat(val)
-            self._set_date(parsed)
-        except ValueError:
-            show_error_dialog(self.page, "Invalid Date", "Enter date as YYYY-MM-DD")
+    def _build_top_controls(self) -> ft.Row:
+        return ft.Row(
+            [
+                HMSButton("Prev", self._handle_prev_day, width=90, height=48, color=HMSColors.SURFACE2),
+                HMSButton("Today", self._handle_today, width=100, height=48, color=HMSColors.BLUE),
+                HMSButton("Next", self._handle_next_day, width=90, height=48, color=HMSColors.SURFACE2),
+                self.date_text,
+                ft.Container(expand=True),
+                HMSButton("Export Sales CSV", self._handle_export_sales, width=170, height=48, color=HMSColors.GREEN),
+                HMSButton("Export Inventory CSV", self._handle_export_inventory, width=190, height=48, color=HMSColors.GREEN),
+                HMSButton("Back", lambda e: self.on_back(), width=100, height=48),
+            ],
+            spacing=8,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        )
 
     def _load_reports(self):
-        """Load reports from API for selected date."""
+        today = self._selected_date.isoformat()
+        yesterday = (self._selected_date - timedelta(days=1)).isoformat()
+        self.date_text.value = self._selected_date.strftime("%A, %d %b %Y")
         try:
             with httpx.Client(timeout=5.0) as client:
-                sales_response = client.get(
-                    f"{self.api_base}/api/reports/daily-sales",
-                    params={"report_date": self._selected_date.isoformat()},
-                )
-                inventory_response = client.get(
-                    f"{self.api_base}/api/reports/inventory-snapshot",
-                )
+                sales_resp = client.get(f"{self.api_base}/api/reports/daily-sales", params={"date": today})
+                inv_resp = client.get(f"{self.api_base}/api/reports/inventory-snapshot")
+                y_sales_resp = client.get(f"{self.api_base}/api/reports/daily-sales", params={"date": yesterday})
+                self._sales_data = sales_resp.json() if sales_resp.status_code == 200 else {}
+                self._inventory_data = inv_resp.json() if inv_resp.status_code == 200 else {}
+                self._yesterday_sales_data = y_sales_resp.json() if y_sales_resp.status_code == 200 else {}
+        except Exception as ex:
+            show_error_dialog(self._page, "Report Error", str(ex))
+            self._sales_data = {}
+            self._inventory_data = {}
+            self._yesterday_sales_data = {}
 
-                if sales_response.status_code == 200:
-                    self._sales_data = sales_response.json()
-                    self._display_sales_summary(self._sales_data)
+    def _render(self):
+        total_sales = float(self._sales_data.get("total_sales", 0.0))
+        tx_count = int(self._sales_data.get("transactions_count", 0))
+        avg_order = float(self._sales_data.get("avg_order_value", 0.0))
+        pay = self._sales_data.get("payment_breakdown", {}) or {}
+        low_stock_count = int(self._inventory_data.get("low_stock_count", 0))
 
-                if inventory_response.status_code == 200:
-                    self._inventory_data = inventory_response.json()
-                    self._display_inventory_summary(self._inventory_data)
+        self.stats_row.controls = [
+            ft.Container(expand=1, content=stat_card("Rs", f"Rs.{total_sales:.2f}", "Revenue", HMSColors.GREEN)),
+            ft.Container(expand=1, content=stat_card("🧾", str(tx_count), "Transactions", HMSColors.ACCENT)),
+            ft.Container(expand=1, content=stat_card("AVG", f"Rs.{avg_order:.2f}", "Avg Order", HMSColors.BLUE)),
+            ft.Container(expand=1, content=stat_card("⚠", str(low_stock_count), "Low Stock", HMSColors.YELLOW)),
+        ]
 
-        except Exception:
-            pass  # API may not be running yet
+        self._render_hourly_chart()
+        self._render_payment_breakdown(pay)
+        self._render_top_items()
+        self._render_inventory_snapshot()
 
-    def _display_sales_summary(self, data: dict):
-        """Display sales summary by rebuilding the card content."""
-        revenue = data.get("total_revenue", 0.0)
-        tx_count = data.get("transaction_count", 0)
-        avg_order = data.get("average_order_value", revenue / tx_count if tx_count > 0 else 0.0)
+        for ctl in [self.date_text, self.stats_row, self.hourly_chart, self.payment_rows, self.top_items_rows, self.inventory_snapshot_grid]:
+            if ctl.page:
+                ctl.update()
 
-        # Payment breakdown — API returns "payment_methods": {method: {count, total}}
-        payment_methods = data.get("payment_methods", {})
-        breakdown_chips = []
-        for method, info in payment_methods.items():
-            total = info.get("total", 0.0) if isinstance(info, dict) else info
-            count = info.get("count", 0) if isinstance(info, dict) else 0
-            breakdown_chips.append(
-                ft.Chip(
-                    label=ft.Text(f"{method}: ₹{total:.2f} ({count})"),
-                    bgcolor=HMSColors.BG_SECONDARY,
+    def _render_hourly_chart(self):
+        hours = [f"{h:02d}" for h in range(8, 21)]
+        today_series = self._sales_data.get("hourly_sales", {}) or {}
+        y_series = self._yesterday_sales_data.get("hourly_sales", {}) or {}
+        vals = [float(today_series.get(h, 0.0)) for h in hours] + [float(y_series.get(h, 0.0)) for h in hours]
+        max_val = max(vals) if vals else 1.0
+        max_val = max(max_val, 1.0)
+
+        self.hourly_chart.controls.clear()
+        for h in hours:
+            t_val = float(today_series.get(h, 0.0))
+            y_val = float(y_series.get(h, 0.0))
+            t_height = max(4, int((t_val / max_val) * 100))
+            y_height = max(4, int((y_val / max_val) * 100))
+            self.hourly_chart.controls.append(
+                ft.Column(
+                    [
+                        ft.Container(width=12, height=t_height, bgcolor=HMSColors.ACCENT, border_radius=4),
+                        ft.Container(width=12, height=y_height, bgcolor=HMSColors.SURFACE3, border_radius=4),
+                        ft.Text(h, size=9, color=HMSColors.TEXT_MUTED),
+                    ],
+                    spacing=2,
+                    horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+                    alignment=ft.MainAxisAlignment.END,
                 )
             )
 
-        # Top sellers — API returns "quantity_sold" not "quantity"
-        top_items = data.get("top_items", [])
-        top_items_widgets = []
-        for idx, item in enumerate(top_items[:5], 1):
-            qty = item.get("quantity_sold", item.get("quantity", 0))
-            rev = item.get("revenue", 0.0)
-            top_items_widgets.append(
-                ft.Text(f"  {idx}. {item.get('name', 'Unknown')} — {qty} sold (₹{rev:,.2f})", size=13)
+    def _render_payment_breakdown(self, pay: dict):
+        self.payment_rows.controls.clear()
+        total = max(float(pay.get("cash", 0.0)) + float(pay.get("card", 0.0)) + float(pay.get("voucher", 0.0)), 1.0)
+        rows = [
+            ("Cash", float(pay.get("cash", 0.0)), HMSColors.GREEN),
+            ("Card", float(pay.get("card", 0.0)), HMSColors.BLUE),
+            ("Voucher", float(pay.get("voucher", 0.0)), HMSColors.ACCENT),
+        ]
+        for label, value, color in rows:
+            pct = (value / total) * 100.0
+            self.payment_rows.controls.append(
+                ft.Column(
+                    [
+                        ft.Row(
+                            [
+                                ft.Text(label, size=12, color=HMSColors.TEXT_SECONDARY),
+                                ft.Container(expand=True),
+                                ft.Text(f"Rs.{value:.2f}", size=12, color=HMSColors.TEXT_PRIMARY, font_family="DM Mono"),
+                                ft.Text(f"{pct:.0f}%", size=12, color=HMSColors.TEXT_SECONDARY, font_family="DM Mono"),
+                            ]
+                        ),
+                        ft.Stack(
+                            [
+                                ft.Container(width=260, height=4, bgcolor=HMSColors.SURFACE3, border_radius=4),
+                                ft.Container(width=max(4, int(260 * pct / 100.0)), height=4, bgcolor=color, border_radius=4),
+                            ],
+                            width=260,
+                            height=4,
+                        ),
+                    ],
+                    spacing=4,
+                    tight=True,
+                )
             )
 
-        report_date_str = data.get("date", self._selected_date.isoformat())
+    def _render_top_items(self):
+        self.top_items_rows.controls.clear()
+        top = self._sales_data.get("top_items", []) or []
+        if not top:
+            self.top_items_rows.controls.append(ft.Text("No top-item data", color=HMSColors.TEXT_SECONDARY))
+            return
+        max_qty = max(int(item.get("qty_sold", 0)) for item in top) if top else 1
+        max_qty = max(max_qty, 1)
+        for idx, item in enumerate(top[:5], start=1):
+            qty = int(item.get("qty_sold", 0))
+            w = max(4, int((qty / max_qty) * 110))
+            self.top_items_rows.controls.append(
+                ft.Row(
+                    [
+                        ft.Text(str(idx), width=24, size=18, color=HMSColors.TEXT_MUTED, font_family="Syne"),
+                        ft.Text(str(item.get("item_name", "Item")), expand=True, color=HMSColors.TEXT_PRIMARY),
+                        ft.Stack(
+                            [
+                                ft.Container(width=110, height=6, bgcolor=HMSColors.SURFACE3, border_radius=4),
+                                ft.Container(width=w, height=6, bgcolor=HMSColors.ACCENT, border_radius=4),
+                            ],
+                            width=110,
+                            height=6,
+                        ),
+                        ft.Text(str(qty), width=40, text_align=ft.TextAlign.RIGHT, color=HMSColors.TEXT_SECONDARY, font_family="DM Mono"),
+                    ],
+                    spacing=8,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                )
+            )
 
-        self.sales_summary.content = ft.Container(
-            content=ft.Column(
-                [
-                    ft.Row([
-                        ft.Text("Daily Sales Summary", size=18, weight="bold"),
-                        ft.Container(expand=True),
-                        ft.Text(report_date_str, size=12, color=HMSColors.TEXT_SECONDARY),
-                    ]),
-                    ft.Row([
-                        ft.Column([
-                            ft.Text("Total Revenue", size=12, color=HMSColors.TEXT_SECONDARY),
-                            ft.Text(f"₹{revenue:,.2f}", size=24, weight="bold", color=HMSColors.SUCCESS),
-                        ]),
-                        ft.Column([
-                            ft.Text("Transactions", size=12, color=HMSColors.TEXT_SECONDARY),
-                            ft.Text(str(tx_count), size=24, weight="bold"),
-                        ]),
-                        ft.Column([
-                            ft.Text("Average Order", size=12, color=HMSColors.TEXT_SECONDARY),
-                            ft.Text(f"₹{avg_order:,.2f}", size=24, weight="bold"),
-                        ]),
-                    ], spacing=40),
-                    ft.Divider(),
-                    ft.Text("Payment Breakdown", size=14, weight="bold"),
-                    ft.Row(breakdown_chips, spacing=10, wrap=True) if breakdown_chips else ft.Text("No payments yet", size=12, color=HMSColors.TEXT_SECONDARY),
-                    ft.Divider(),
-                    ft.Text("Top Selling Items", size=14, weight="bold"),
-                    *(top_items_widgets if top_items_widgets else [ft.Text("No sales data yet", size=12, color=HMSColors.TEXT_SECONDARY)]),
-                ],
-                spacing=10,
-            ),
-            padding=20,
-        )
-        try:
-            self.sales_summary.update()
-        except Exception:
-            pass
-
-    def _display_inventory_summary(self, data: dict):
-        """Display inventory summary by rebuilding the card content."""
-        items_list = data.get("inventory", data.get("items", []))
-        total_items = data.get("total_items", len(items_list))
-        low_stock_items = data.get("low_stock_items", [i for i in items_list if i.get("is_low_stock", False)])
-
-        low_stock_widgets = []
-        for item in low_stock_items:
-            stock = item.get("stock_on_hand", 0)
-            low_stock_widgets.append(
+    def _render_inventory_snapshot(self):
+        self.inventory_snapshot_grid.controls.clear()
+        tiles = [
+            ("In Stock", int(self._inventory_data.get("in_stock_count", 0)), HMSColors.GREEN),
+            ("Low Stock", int(self._inventory_data.get("low_stock_count", 0)), HMSColors.YELLOW),
+            ("Out of Stock", int(self._inventory_data.get("out_of_stock_count", 0)), HMSColors.RED),
+            ("Total", int(self._inventory_data.get("total_items", 0)), HMSColors.BLUE),
+        ]
+        for label, value, color in tiles:
+            self.inventory_snapshot_grid.controls.append(
                 ft.Container(
-                    content=ft.Row([
-                        ft.Icon(ft.icons.WARNING_AMBER_ROUNDED, color=HMSColors.WARNING, size=18),
-                        ft.Text(item.get("name", "Unknown"), size=13, weight="bold"),
-                        ft.Container(expand=True),
-                        ft.Text(f"Stock: {stock}", size=13, color=HMSColors.ERROR if stock <= 0 else HMSColors.WARNING),
-                        ft.Text(f"Reorder: {item.get('reorder_level', 0)}", size=12, color=HMSColors.TEXT_SECONDARY),
-                    ]),
-                    padding=ft.padding.symmetric(vertical=4),
+                    width=130,
+                    height=90,
+                    bgcolor=HMSColors.SURFACE2,
+                    border=ft.border.all(1, HMSColors.BORDER),
+                    border_radius=10,
+                    padding=10,
+                    content=ft.Column(
+                        [
+                            ft.Text(str(value), size=26, color=color, weight=ft.FontWeight.W_800, font_family="Syne"),
+                            ft.Text(label, size=12, color=HMSColors.TEXT_SECONDARY),
+                        ],
+                        spacing=4,
+                        tight=True,
+                    ),
                 )
             )
 
-        if not low_stock_widgets:
-            low_stock_widgets = [ft.Text("All items well stocked", size=13, color=HMSColors.SUCCESS)]
+    def _handle_prev_day(self, e):
+        self._selected_date -= timedelta(days=1)
+        self._load_reports()
+        self._render()
 
-        self.inventory_summary.content = ft.Container(
-            content=ft.Column(
-                [
-                    ft.Text("Inventory Status", size=18, weight="bold"),
-                    ft.Row([
-                        ft.Column([
-                            ft.Text("Total Items", size=12, color=HMSColors.TEXT_SECONDARY),
-                            ft.Text(str(total_items), size=24, weight="bold"),
-                        ]),
-                        ft.Column([
-                            ft.Text("Low Stock Items", size=12, color=HMSColors.WARNING),
-                            ft.Text(str(len(low_stock_items)), size=24, weight="bold", color=HMSColors.WARNING),
-                        ]),
-                    ], spacing=40),
-                    ft.Divider(),
-                    ft.Text("Low Stock Alerts", size=14, weight="bold"),
-                    *low_stock_widgets,
-                ],
-                spacing=10,
-            ),
-            padding=20,
-        )
-        try:
-            self.inventory_summary.update()
-        except Exception:
-            pass
+    def _handle_next_day(self, e):
+        self._selected_date += timedelta(days=1)
+        self._load_reports()
+        self._render()
 
-    def _handle_txn_search(self, e):
-        """Search transactions with filters."""
-        try:
-            params = {}
-            if self.txn_start_date.value.strip():
-                params["start_date"] = self.txn_start_date.value.strip()
-            if self.txn_end_date.value.strip():
-                params["end_date"] = self.txn_end_date.value.strip()
-            if self.txn_method_filter.value:
-                params["payment_method"] = self.txn_method_filter.value
-
-            with httpx.Client(timeout=5.0) as client:
-                response = client.get(
-                    f"{self.api_base}/api/reports/transactions",
-                    params=params,
-                )
-                if response.status_code == 200:
-                    results = response.json()
-                    self._display_transactions(results)
-        except Exception as err:
-            show_error_dialog(self.page, "Search Error", str(err))
-
-    def _display_transactions(self, transactions: list):
-        """Display transaction search results."""
-        self.txn_results_list.controls.clear()
-        self.txn_count_text.value = f"{len(transactions)} transaction(s) found"
-
-        if not transactions:
-            self.txn_results_list.controls.append(
-                ft.Text("No transactions found", size=13, color=HMSColors.TEXT_SECONDARY)
-            )
-        else:
-            for txn in transactions:
-                self.txn_results_list.controls.append(
-                    ft.Container(
-                        content=ft.Row([
-                            ft.Text(f"#{txn.get('receipt_number', '—')}", size=13, weight="bold"),
-                            ft.Text(f"Table {txn.get('table_id', '—')}", size=13),
-                            ft.Text(txn.get("payment_method", "—"), size=12, color=HMSColors.TEXT_SECONDARY),
-                            ft.Container(expand=True),
-                            ft.Text(f"₹{txn.get('total', 0):.2f}", size=13, weight="bold"),
-                        ]),
-                        padding=ft.padding.symmetric(vertical=4, horizontal=8),
-                        bgcolor=HMSColors.BG_SECONDARY,
-                        border_radius=4,
-                    )
-                )
-
-        try:
-            self.txn_results_list.update()
-            self.txn_count_text.update()
-        except Exception:
-            pass
+    def _handle_today(self, e):
+        self._selected_date = date.today()
+        self._load_reports()
+        self._render()
 
     def _handle_export_sales(self, e):
-        """Export daily sales summary to CSV file."""
-        if not self._sales_data:
-            show_error_dialog(self.page, "No Data", "Load reports first before exporting.")
-            return
-
         try:
-            output = io.StringIO()
-            writer = csv.writer(output)
-
-            # Header
-            writer.writerow(["Daily Sales Report", self._sales_data.get("date", "")])
-            writer.writerow([])
-            writer.writerow(["Metric", "Value"])
-            writer.writerow(["Total Revenue", f"₹{self._sales_data.get('total_revenue', 0):.2f}"])
-            writer.writerow(["Transaction Count", self._sales_data.get("transaction_count", 0)])
-            writer.writerow(["Average Order Value", f"₹{self._sales_data.get('average_order_value', 0):.2f}"])
-            writer.writerow([])
-
-            # Payment methods
-            writer.writerow(["Payment Method", "Count", "Total"])
-            for method, info in self._sales_data.get("payment_methods", {}).items():
-                total = info.get("total", 0) if isinstance(info, dict) else info
-                count = info.get("count", 0) if isinstance(info, dict) else 0
-                writer.writerow([method, count, f"₹{total:.2f}"])
-            writer.writerow([])
-
-            # Top items
-            writer.writerow(["Top Item", "Quantity Sold", "Revenue"])
-            for item in self._sales_data.get("top_items", []):
-                writer.writerow([
-                    item.get("name", "Unknown"),
-                    item.get("quantity_sold", 0),
-                    f"₹{item.get('revenue', 0):.2f}",
-                ])
-
-            csv_content = output.getvalue()
             filename = f"sales_report_{self._selected_date.isoformat()}.csv"
-
-            # Save to current directory
+            rows: List[dict] = self._sales_data.get("transactions", []) or []
             with open(filename, "w", newline="", encoding="utf-8") as f:
-                f.write(csv_content)
-
-            show_success_dialog(self.page, "CSV Exported", f"Sales report saved to {filename}")
+                writer = csv.DictWriter(
+                    f,
+                    fieldnames=["order_id", "receipt_number", "table_id", "total_amount", "payment_method", "finalized_at"],
+                )
+                writer.writeheader()
+                for r in rows:
+                    writer.writerow(
+                        {
+                            "order_id": r.get("order_id", ""),
+                            "receipt_number": r.get("receipt_number", ""),
+                            "table_id": r.get("table_id", ""),
+                            "total_amount": r.get("total_amount", ""),
+                            "payment_method": r.get("payment_method", ""),
+                            "finalized_at": r.get("finalized_at", ""),
+                        }
+                    )
+            show_success_dialog(self._page, "CSV Exported", f"Sales report saved to {filename}")
         except Exception as err:
-            show_error_dialog(self.page, "Export Error", str(err))
+            show_error_dialog(self._page, "Export Error", str(err))
 
     def _handle_export_inventory(self, e):
-        """Export inventory snapshot to CSV file."""
-        if not self._inventory_data:
-            show_error_dialog(self.page, "No Data", "Load reports first before exporting.")
-            return
-
         try:
-            output = io.StringIO()
-            writer = csv.writer(output)
-
-            writer.writerow(["Inventory Snapshot", datetime.now().strftime("%Y-%m-%d %H:%M")])
-            writer.writerow([])
-            writer.writerow(["Item Name", "Category", "Unit Price", "Stock On Hand", "Reorder Level", "Low Stock?"])
-
-            for item in self._inventory_data.get("inventory", []):
-                writer.writerow([
-                    item.get("name", ""),
-                    item.get("category", ""),
-                    f"₹{item.get('unit_price', 0):.2f}",
-                    item.get("stock_on_hand", 0),
-                    item.get("reorder_level", 0),
-                    "YES" if item.get("is_low_stock", False) else "No",
-                ])
-
-            csv_content = output.getvalue()
-            filename = f"inventory_snapshot_{date.today().isoformat()}.csv"
-
+            filename = f"inventory_snapshot_{self._selected_date.isoformat()}.csv"
             with open(filename, "w", newline="", encoding="utf-8") as f:
-                f.write(csv_content)
-
-            show_success_dialog(self.page, "CSV Exported", f"Inventory snapshot saved to {filename}")
+                writer = csv.DictWriter(
+                    f,
+                    fieldnames=["total_items", "in_stock_count", "low_stock_count", "out_of_stock_count"],
+                )
+                writer.writeheader()
+                writer.writerow(
+                    {
+                        "total_items": self._inventory_data.get("total_items", 0),
+                        "in_stock_count": self._inventory_data.get("in_stock_count", 0),
+                        "low_stock_count": self._inventory_data.get("low_stock_count", 0),
+                        "out_of_stock_count": self._inventory_data.get("out_of_stock_count", 0),
+                    }
+                )
+            show_success_dialog(self._page, "CSV Exported", f"Inventory snapshot saved to {filename}")
         except Exception as err:
-            show_error_dialog(self.page, "Export Error", str(err))
+            show_error_dialog(self._page, "Export Error", str(err))
+

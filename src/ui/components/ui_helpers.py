@@ -5,32 +5,57 @@ Touch-friendly buttons, widgets, and utility functions.
 """
 
 import time
+import threading
+from datetime import datetime
 import flet as ft
 import httpx
 from typing import Callable, Optional
 
 
 class HMSColors:
-    """HMS Color Scheme (WCAG AAA high contrast, colorblind-friendly)."""
-    PRIMARY = "#1565C0"      # Blue (darker for AAA — 7.3:1 on white)
-    SUCCESS = "#2E7D32"      # Green (darker for AAA — 7.1:1 on white)
-    WARNING = "#E65100"      # Orange (darker for AAA — 5.8:1, used as bg)
-    ERROR = "#C62828"        # Red (darker for AAA — 7.2:1 on white)
-    NEUTRAL = "#616161"      # Gray (darker for AAA — 5.9:1 on white)
+    """HMS design tokens aligned with the dark redesign prototype."""
 
-    # Backgrounds
-    BG_PRIMARY = "#FFFFFF"   # White
-    BG_SECONDARY = "#F5F5F5" # Light gray
+    BG = "#0E1117"
+    SURFACE = "#161B27"
+    SURFACE2 = "#1E2535"
+    SURFACE3 = "#252D40"
+    BORDER = "#2A3349"
 
-    # Text
-    TEXT_PRIMARY = "#212121"     # Dark (16.1:1 on white — AAA)
-    TEXT_SECONDARY = "#424242"   # Darker gray (11.7:1 on white — AAA)
-    TEXT_LIGHT = "#FFFFFF"       # White
+    ACCENT = "#FF6B35"
+    ACCENT2 = "#FFB347"
+
+    GREEN = "#22C55E"
+    GREEN_DIM = "#16A34A20"
+    RED = "#EF4444"
+    RED_DIM = "#DC262620"
+    YELLOW = "#EAB308"
+    YELLOW_DIM = "#CA8A0420"
+    BLUE = "#3B82F6"
+    BLUE_DIM = "#2563EB20"
+
+    TEXT_PRIMARY = "#F0F4FF"
+    TEXT_SECONDARY = "#8B96B0"
+    TEXT_MUTED = "#4B5675"
+    TEXT_LIGHT = "#FFFFFF"
+
+    # Backward compatibility aliases used throughout existing screens.
+    BG_PRIMARY = BG
+    BG_SECONDARY = SURFACE
+    PRIMARY = ACCENT
+    SUCCESS = GREEN
+    WARNING = YELLOW
+    ERROR = RED
+    NEUTRAL = TEXT_MUTED
+    EMERALD = GREEN
+    BG_DARK = BG
+    BG_CARD_DARK = SURFACE
+    BORDER_DARK = BORDER
+    TEXT_ON_DARK = TEXT_PRIMARY
 
 
 class HMSButton(ft.ElevatedButton):
     """
-    Large, touch-friendly button (min 56px height).
+    Large, touch-friendly button (min 48dp height; default 56).
 
     Styled for HMS with high contrast and accessibility.
     """
@@ -40,7 +65,7 @@ class HMSButton(ft.ElevatedButton):
         text: str,
         on_click: Callable,
         width: int = 300,
-        height: int = 56,
+        height: int = 56,  # min 48 for touch
         color: str = HMSColors.PRIMARY,
         text_size: int = 18,
         **kwargs
@@ -209,6 +234,14 @@ class OrderSummaryWidget(ft.Card):
             ),
             margin=10,
         )
+        self._summary_values = {
+            "table_id": "—",
+            "item_count": 0,
+            "subtotal": 0.0,
+            "discount": 0.0,
+            "tax": 0.0,
+            "total": 0.0,
+        }
 
     def update_summary(
         self,
@@ -227,6 +260,16 @@ class OrderSummaryWidget(ft.Card):
         self.discount_text.value = f"Discount: ₹{discount:.2f}"
         self.tax_text.value = f"Tax (18%): ₹{tax:.2f}"
         self.total_text.value = f"Total: ₹{total:.2f}"
+        self._summary_values.update(
+            {
+                "table_id": table_id,
+                "item_count": item_count,
+                "subtotal": subtotal,
+                "discount": discount,
+                "tax": tax,
+                "total": total,
+            }
+        )
 
         # Update line items list
         self.line_items_list.controls.clear()
@@ -239,6 +282,11 @@ class OrderSummaryWidget(ft.Card):
             )
 
         self.update()
+
+    @property
+    def total_value(self) -> float:
+        """Return the most recent total amount."""
+        return self._summary_values["total"]
 
 
 class ItemPickerWidget(ft.Column):
@@ -361,19 +409,233 @@ class ItemPickerWidget(ft.Column):
         )
 
 
+def build_header(screen_title: str, current_user: Optional[dict]) -> ft.Container:
+    """Build the shared HMS dark header used across operational screens."""
+    user = current_user or {}
+    username = str(user.get("username", "User"))
+    role = str(user.get("role", "STAFF")).upper()
+    initial = (username[:1] or "U").upper()
+
+    clock_text = ft.Text(
+        datetime.now().strftime("%H:%M"),
+        size=12,
+        color=HMSColors.TEXT_SECONDARY,
+        font_family="DM Mono",
+    )
+
+    def _tick():
+        clock_text.value = datetime.now().strftime("%H:%M")
+        try:
+            if clock_text.page:
+                clock_text.update()
+        except Exception:
+            pass
+        timer = threading.Timer(60.0, _tick)
+        timer.daemon = True
+        timer.start()
+
+    timer = threading.Timer(60.0, _tick)
+    timer.daemon = True
+    timer.start()
+
+    return ft.Container(
+        height=60,
+        bgcolor=HMSColors.SURFACE,
+        border=ft.border.only(bottom=ft.BorderSide(1, HMSColors.BORDER)),
+        padding=ft.padding.symmetric(horizontal=16),
+        content=ft.Row(
+            [
+                ft.Text("HMS", size=20, weight=ft.FontWeight.W_800, color=HMSColors.ACCENT, font_family="Syne"),
+                ft.Text("· Hotel Management", size=12, color=HMSColors.TEXT_SECONDARY),
+                ft.Container(width=1, height=20, bgcolor=HMSColors.BORDER),
+                ft.Text(screen_title, size=15, weight=ft.FontWeight.W_600, color=HMSColors.TEXT_PRIMARY, font_family="Syne"),
+                ft.Container(expand=True),
+                ft.Container(
+                    padding=ft.padding.symmetric(horizontal=10, vertical=6),
+                    bgcolor=HMSColors.GREEN_DIM,
+                    border=ft.border.all(1, HMSColors.GREEN + "60"),
+                    border_radius=8,
+                    content=ft.Row(
+                        [
+                            ft.Container(width=8, height=8, bgcolor=HMSColors.GREEN, border_radius=6),
+                            ft.Text("OFFLINE READY", size=11, color=HMSColors.GREEN, font_family="DM Mono"),
+                        ],
+                        spacing=6,
+                        tight=True,
+                    ),
+                ),
+                clock_text,
+                ft.Container(
+                    bgcolor=HMSColors.SURFACE2,
+                    border_radius=40,
+                    border=ft.border.all(1, HMSColors.BORDER),
+                    padding=ft.padding.symmetric(horizontal=8, vertical=6),
+                    content=ft.Row(
+                        [
+                            ft.Container(
+                                width=26,
+                                height=26,
+                                border_radius=20,
+                                gradient=ft.LinearGradient(colors=[HMSColors.ACCENT, HMSColors.ACCENT2]),
+                                alignment=ft.alignment.center,
+                                content=ft.Text(initial, size=12, color=HMSColors.TEXT_LIGHT, weight=ft.FontWeight.W_700),
+                            ),
+                            ft.Text(username, size=12, color=HMSColors.TEXT_PRIMARY),
+                            status_tag(role, HMSColors.ACCENT),
+                        ],
+                        spacing=8,
+                        tight=True,
+                    ),
+                ),
+            ],
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            spacing=10,
+        ),
+    )
+
+
+def stat_card(icon: str, value: str, label: str, color: str) -> ft.Container:
+    """Build a dark stat card with top accent strip and icon highlight."""
+    return ft.Container(
+        bgcolor=HMSColors.SURFACE,
+        border=ft.border.all(1, HMSColors.BORDER),
+        border_radius=12,
+        padding=20,
+        content=ft.Column(
+            [
+                ft.Container(height=2, bgcolor=color, border_radius=2),
+                ft.Row(
+                    [
+                        ft.Container(
+                            width=40,
+                            height=40,
+                            border_radius=10,
+                            bgcolor=color + "20",
+                            alignment=ft.alignment.center,
+                            content=ft.Text(icon, size=16, color=color),
+                        ),
+                        ft.Container(expand=True),
+                    ]
+                ),
+                ft.Text(str(value), size=28, weight=ft.FontWeight.W_800, color=HMSColors.TEXT_PRIMARY, font_family="Syne"),
+                ft.Text(label, size=12, color=HMSColors.TEXT_SECONDARY),
+            ],
+            spacing=8,
+            tight=True,
+        ),
+    )
+
+
+def status_tag(text: str, color: str) -> ft.Container:
+    """Build a compact status pill used across screens."""
+    return ft.Container(
+        bgcolor=color + "20",
+        border=ft.border.all(1, color + "40"),
+        border_radius=6,
+        padding=ft.padding.symmetric(horizontal=8, vertical=3),
+        content=ft.Text(text.upper(), size=11, color=color, weight=ft.FontWeight.W_600, font_family="DM Mono"),
+    )
+
+
+def stock_bar(current: int, max_stock: int, color: Optional[str] = None) -> ft.Column:
+    """Render a stock progress bar with threshold-based coloring."""
+    safe_max = max(max_stock, 1)
+    ratio = max(0.0, min(float(current) / float(safe_max), 1.0))
+
+    if color is None:
+        if ratio > 0.5:
+            fill = HMSColors.GREEN
+        elif ratio >= 0.2:
+            fill = HMSColors.YELLOW
+        else:
+            fill = HMSColors.RED
+    else:
+        fill = color
+
+    bar_width = 120
+    return ft.Column(
+        [
+            ft.Row(
+                [
+                    ft.Text(str(current), size=11, color=HMSColors.TEXT_PRIMARY),
+                    ft.Container(expand=True),
+                    ft.Text(f"/ {safe_max}", size=11, color=HMSColors.TEXT_SECONDARY),
+                ],
+                spacing=2,
+            ),
+            ft.Stack(
+                [
+                    ft.Container(width=bar_width, height=4, bgcolor=HMSColors.SURFACE3, border_radius=4),
+                    ft.Container(width=max(2, int(bar_width * ratio)), height=4, bgcolor=fill, border_radius=4),
+                ],
+                width=bar_width,
+                height=4,
+            ),
+        ],
+        spacing=4,
+        tight=True,
+    )
+
+
+def tag_chip(text: str, bg: str, fg: str = HMSColors.TEXT_LIGHT) -> ft.Container:
+    """Build a compact rounded chip for tags, filters, and role pills."""
+    return ft.Container(
+        bgcolor=bg,
+        border_radius=8,
+        padding=ft.padding.symmetric(horizontal=14, vertical=6),
+        content=ft.Text(text, size=12, weight=ft.FontWeight.W_600, color=fg),
+    )
+
+
+def activity_item(event_type: str, description: str, ts: str, color: str) -> ft.Container:
+    """Build one activity row used by dashboard and AI event feed panels."""
+    return ft.Container(
+        padding=ft.padding.symmetric(vertical=8, horizontal=2),
+        border=ft.border.only(bottom=ft.BorderSide(1, HMSColors.BORDER + "66")),
+        content=ft.Row(
+            [
+                ft.Container(width=8, height=8, bgcolor=color, border_radius=6),
+                ft.Column(
+                    [
+                        ft.Text(description, size=12, color=HMSColors.TEXT_PRIMARY, max_lines=2, overflow=ft.TextOverflow.ELLIPSIS),
+                        ft.Text(event_type, size=10, color=HMSColors.TEXT_MUTED),
+                    ],
+                    spacing=2,
+                    expand=True,
+                    tight=True,
+                ),
+                ft.Text(ts, size=11, color=HMSColors.TEXT_SECONDARY, font_family="DM Mono"),
+            ],
+            spacing=8,
+            vertical_alignment=ft.CrossAxisAlignment.START,
+        ),
+    )
+
+
+def section_header(title: str, action: Optional[ft.Control] = None) -> ft.Row:
+    """Build a section heading row with optional action control."""
+    controls = [
+        ft.Text(title.upper(), size=11, weight=ft.FontWeight.W_700, color=HMSColors.TEXT_MUTED),
+        ft.Container(expand=True),
+    ]
+    if action is not None:
+        controls.append(action)
+    return ft.Row(controls, vertical_alignment=ft.CrossAxisAlignment.CENTER)
+
+
 def create_header(
     page: ft.Page,
     title: str,
     user_info: str = "",
 ) -> ft.AppBar:
-    """Create HMS header/app bar."""
+    """Legacy AppBar helper kept for compatibility with older screens."""
     return ft.AppBar(
-        title=ft.Text(title, size=20, weight="bold"),
+        title=ft.Text(title, size=18, weight="bold", color=HMSColors.TEXT_PRIMARY),
         center_title=False,
-        bgcolor=HMSColors.PRIMARY,
+        bgcolor=HMSColors.SURFACE,
         color=HMSColors.TEXT_LIGHT,
         actions=[
-            ft.Text(user_info, color=HMSColors.TEXT_LIGHT, size=14),
+            ft.Text(user_info, color=HMSColors.TEXT_SECONDARY, size=13),
         ] if user_info else [],
     )
 

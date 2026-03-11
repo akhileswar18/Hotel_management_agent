@@ -1,15 +1,15 @@
 """
-LLM Client — Configurable client for Ollama, Groq, or OpenAI-compatible APIs.
+LLM Client — Configurable client for OpenAI, Groq, or Ollama.
 
 Used by InsightAgent and IntentParser (LLM mode). Timeout and graceful
 degradation are critical:
 - Default timeout 8s so core flow is never blocked.
 - Returns None on timeout/error for degradable behavior.
 
-Supported providers:
-- ollama: Local Ollama (default, no API key needed)
-- groq: Groq cloud (fast, needs GROQ_API_KEY)
-- openai: OpenAI or any compatible endpoint (needs LLM_API_KEY)
+Supported providers (set LLM_PROVIDER env):
+- openai: Default for paid API; GPT-4o-mini (needs LLM_API_KEY or OPENAI_API_KEY)
+- groq: Groq cloud (needs GROQ_API_KEY)
+- ollama: Local; set LLM_PROVIDER=ollama when using local Ollama (no API key)
 """
 
 import logging
@@ -37,7 +37,7 @@ class LLMClient:
         api_key: Optional[str] = None,
         base_url: Optional[str] = None,
     ):
-        self.provider = (provider or os.environ.get("LLM_PROVIDER", "ollama")).lower()
+        self.provider = (provider or os.environ.get("LLM_PROVIDER", "openai")).lower()
         default_model = self.DEFAULT_MODELS.get(self.provider, "llama3.2")
         self.model = model or os.environ.get("LLM_MODEL", default_model)
         self.timeout = float(os.environ.get("LLM_TIMEOUT", timeout))

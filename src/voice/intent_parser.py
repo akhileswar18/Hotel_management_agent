@@ -11,7 +11,10 @@ Supports follow-up detection for conversational command flows.
 import json
 import logging
 import re
-from typing import Dict, Any, List, Optional
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
+from src.config import settings
 
 logger = logging.getLogger("hms.intent_parser")
 
@@ -29,15 +32,43 @@ REQUIRED_FIELDS = {
 }
 
 FOLLOW_UP_PROMPTS = {
-    "table_id": "Which table number?",
-    "items": "What items would you like? (e.g., '2 biryani and 1 coke')",
-    "payment_method": "Payment method? (cash, card, or voucher)",
-    "name": "What is the product name?",
-    "price": "What is the unit price (in ₹)?",
-    "category": "What category? (food, beverage, dessert, other)",
-    "item_name": "Which product?",
-    "quantity": "How many units?",
-    "reason": "Reason for voiding?",
+    "en": {
+        "table_id": "Which table number?",
+        "items": "What items would you like? (e.g., '2 biryani and 1 coke')",
+        "payment_method": "Payment method? (cash, card, or voucher)",
+        "name": "What is the product name?",
+        "price": "What is the unit price (in ₹)?",
+        "category": "What category? (food, beverage, dessert, other)",
+        "item_name": "Which product?",
+        "quantity": "How many units?",
+        "reason": "Reason for voiding?",
+    },
+    "te": {
+        "table_id": "ఏ టేబుల్ కోసం?",
+        "items": "ఎలాంటి ఐటమ్స్ కావాలి? ఉదా: '2 బిర్యానీ 1 నాన్'.",
+        "payment_method": "చెల్లింపు విధానం? (క్యాష్, కార్డ్, వౌచర్)",
+        "name": "ఉత్పత్తి పేరు ఏమిటి?",
+        "price": "యూనిట్ ధర ఎంత? (రూపాయల్లో)",
+        "category": "వర్గం ఏమిటి? (ఆహారం, పానీయం మొదలైనవి)",
+        "item_name": "ఎలాంటి ఉత్పత్తి?",
+        "quantity": "ఎన్ని యూనిట్లు?",
+        "reason": "రద్దు కారణం ఏమిటి?",
+    },
+}
+
+TELUGU_NUMERAL_MAP = {
+    "ఒకటి": "1",
+    "ఒక": "1",
+    "ఒక్క": "1",
+    "రెండు": "2",
+    "మూడు": "3",
+    "నాలుగు": "4",
+    "ఐదు": "5",
+    "ఆరు": "6",
+    "ఏడు": "7",
+    "ఎనిమిది": "8",
+    "తొమ్మిది": "9",
+    "పది": "10",
 }
 
 
@@ -83,16 +114,35 @@ Output: {"action": "report", "type": "daily_sales"}
 Input: "new product paneer tikka at 350 food"
 Output: {"action": "create_product", "name": "Paneer Tikka", "price": 350, "category": "food"}
 
-Input: "void the current order"
-Output: {"action": "void_order", "reason": "Customer request"}
+    Input: "void the current order"
+    Output: {"action": "void_order", "reason": "Customer request"}
 
-Return ONLY the JSON object. No other text."""
+    Return ONLY the JSON object. No other text."""
+    LLM_COMMAND_SYSTEM_PROMPT_TE = """నీవు ఒక హోటల్/రెస్టారెంట్ మేనేజ్‌మెంట్ సిస్టం కోసం ఇంటెంట్ పార్సర్‌వి.
+వాడుకరి చెప్పిన ఆదేశాన్ని స్ట్రక్చర్డ్ JSON లోకి మార్చాలి.
+
+ప్రతిసారీ కేవలం చెల్లుబాటు అయ్యే JSON మాత్రమే ఇవ్వాలి. వివరణలు, కోడ్ బ్లాక్స్ వద్దు.
+
+అందుబాటులో ఉన్న చర్యలు:
+- create_order: table_id, items (పేరు, పరిమాణం), payment_method (CASH/CARD/VOUCHER)
+- add_item: items
+- finalize_order: payment_method
+- void_order: reason (ఐచ్చికం)
+- hold_order
+- create_product: name, price, category
+- stock_in: item_name, quantity
+- report: type (daily_sales)
+
+ఉదాహరణలు (Telugu, Hinglish రెండూ అనుమతించబడతాయి) ఇవ్వబడినవి. JSON మాత్రమే తిరిగి ఇవ్వాలి."""
 
     def __init__(self, item_repo=None, llm_client=None):
         from src.infrastructure import ItemRepository
         self.item_repo = item_repo or ItemRepository()
         self._llm = llm_client  # Lazy-loaded if None
         self._llm_loaded = llm_client is not None
+        self.primary_language = settings.voice_primary_language
+        self.fallback_languages = settings.voice_fallback_languages
+        self._synonym_map = self._load_synonym_map(settings.menu_synonyms_file)
 
     @property
     def llm(self):
@@ -111,15 +161,19 @@ Return ONLY the JSON object. No other text."""
                 logger.debug(f"IntentParser: Could not load LLM client: {e}")
         return self._llm
 
-    def parse(self, text: str) -> Dict[str, Any]:
+    def parse(self, text: str, language: Optional[str] = None) -> Dict[str, Any]:
         """Parse text into an intent dict using LLM (if available) with rule-based fallback.
 
         Returns:
             e.g. {"action": "create_order", "table_id": "5", "items": [...]}
         """
+        language = language or self.primary_language
+        lang_key = self._language_key(language)
+        normalized_text = self._normalize_text(text, lang_key)
+
         # Try LLM first
         if self.llm:
-            llm_result = self._parse_with_llm(text)
+            llm_result = self._parse_with_llm(text, lang_key)
             if llm_result and llm_result.get("action") != "unknown":
                 llm_result["_parsed_by"] = "llm"
                 # Enrich item_ids from inventory if LLM returned item names
@@ -127,11 +181,11 @@ Return ONLY the JSON object. No other text."""
                 return llm_result
 
         # Fall back to rule-based parsing
-        result = self._parse_rule_based(text)
+        result = self._parse_rule_based(normalized_text, lang_key)
         result["_parsed_by"] = "rules"
         return result
 
-    def _parse_with_llm(self, text: str) -> Optional[Dict[str, Any]]:
+    def _parse_with_llm(self, text: str, language: str) -> Optional[Dict[str, Any]]:
         """Use LLM to parse natural language into a structured intent."""
         try:
             # Build the prompt with available item catalog for context
@@ -140,7 +194,8 @@ Return ONLY the JSON object. No other text."""
             if catalog_hint:
                 prompt = f"Available menu items: {catalog_hint}\n\nUser command: {text}"
 
-            raw = self.llm.query(prompt, system_prompt=self.LLM_COMMAND_SYSTEM_PROMPT)
+            system_prompt = self._build_system_prompt(language)
+            raw = self.llm.query(prompt, system_prompt=system_prompt)
             if not raw:
                 logger.debug("LLM returned empty response for intent parsing")
                 return None
@@ -178,6 +233,12 @@ Return ONLY the JSON object. No other text."""
         except Exception:
             return ""
 
+    def _build_system_prompt(self, language: str) -> str:
+        """Return bilingual system prompt based on language preference."""
+        if language.startswith("te"):
+            return self.LLM_COMMAND_SYSTEM_PROMPT_TE
+        return self.LLM_COMMAND_SYSTEM_PROMPT
+
     def _enrich_item_ids(self, intent: Dict[str, Any]):
         """Fill in item_ids from inventory for items matched by name."""
         items = intent.get("items", [])
@@ -204,18 +265,19 @@ Return ONLY the JSON object. No other text."""
                             item["name"] = inv_name.title()
                             break
 
-    def _parse_rule_based(self, text: str) -> Dict[str, Any]:
+    def _parse_rule_based(self, text: str, language: str) -> Dict[str, Any]:
         """Rule-based intent parsing (original keyword-matching approach)."""
         text_lower = text.lower().strip()
+        lang_key = self._language_key(language)
 
         # ── Specific compound phrases checked FIRST (before item-name matching) ──
 
         # Void order
-        if any(kw in text_lower for kw in ["void", "cancel order"]):
+        if any(kw in text_lower for kw in ["void", "cancel order", "రద్దు", "రద్దు చేయి"]):
             return self._parse_void_intent(text_lower)
 
         # Hold order
-        if any(kw in text_lower for kw in ["hold order", "put on hold", "pause order"]):
+        if any(kw in text_lower for kw in ["hold order", "put on hold", "pause order", "హోల్డ్", "ఆపి పెట్టు"]):
             return {"action": "hold_order"}
 
         # Create product / new product  (must be before order check)
@@ -228,18 +290,26 @@ Return ONLY the JSON object. No other text."""
             return self._parse_stock_intent(text_lower)
 
         # Report
-        if any(kw in text_lower for kw in ["report", "summary", "analytics", "sales"]):
+        if any(kw in text_lower for kw in ["report", "summary", "analytics", "sales", "రిపోర్ట్", "వివరాలు"]):
             return {"action": "report", "type": "daily_sales"}
 
         # ── Now check ordering vs finalize ──
 
         has_item_names = self._text_mentions_items(text_lower)
-        has_finalize_kw = any(kw in text_lower for kw in [
-            "finalize", "pay ", "payment", "checkout", "bill",
-        ])
-        has_order_kw = any(kw in text_lower for kw in [
-            "order", "want", "give me", "table",
-        ])
+        finalize_keywords = [
+            "finalize",
+            "pay ",
+            "payment",
+            "checkout",
+            "bill",
+            "చెల్లించు",
+            "బిల్లు",
+        ]
+        order_keywords = ["order", "want", "give me", "table", "ఆర్డర్", "కావాలి", "టేబుల్"]
+        if lang_key == "te":
+            order_keywords.extend(["ఇవ్వు", "పెట్టండీ"])
+        has_finalize_kw = any(kw in text_lower for kw in finalize_keywords)
+        has_order_kw = any(kw in text_lower for kw in order_keywords)
 
         # If text mentions actual product names → it's an order, even with "pay"
         #   e.g. "order 3 biryani for table 7 pay cash"
@@ -257,7 +327,7 @@ Return ONLY the JSON object. No other text."""
 
         # Order-related (no specific items yet — will ask follow-up)
         #   e.g. "create order", "order for table 5", "add 3 items"
-        if has_order_kw or any(kw in text_lower for kw in ["add", "get"]):
+        if has_order_kw or any(kw in text_lower for kw in ["add", "get", "జోడించు"]):
             return self._parse_order_intent(text_lower)
 
         # Fallback: standalone pay/bill
@@ -266,7 +336,9 @@ Return ONLY the JSON object. No other text."""
 
         return {"action": "unknown", "original_text": text}
 
-    def parse_followup(self, pending_intent: Dict[str, Any], text: str) -> Dict[str, Any]:
+    def parse_followup(
+        self, pending_intent: Dict[str, Any], text: str, language: Optional[str] = None
+    ) -> Dict[str, Any]:
         """Merge a follow-up answer into a pending (incomplete) intent.
 
         Uses LLM if available to understand the follow-up in context,
@@ -280,15 +352,18 @@ Return ONLY the JSON object. No other text."""
             Updated intent with the missing fields filled in
         """
         # Try LLM for follow-up understanding
+        language = language or self.primary_language
+        lang_key = self._language_key(language)
+
         if self.llm:
-            llm_result = self._followup_with_llm(pending_intent, text)
+            llm_result = self._followup_with_llm(pending_intent, text, lang_key)
             if llm_result:
                 self._enrich_item_ids(llm_result)
                 llm_result["_parsed_by"] = "llm"
                 return llm_result
 
         action = pending_intent.get("action", "")
-        text_lower = text.lower().strip()
+        text_lower = self._normalize_text(text, lang_key)
         missing = self.get_missing_fields(pending_intent)
 
         if "table_id" in missing:
@@ -302,9 +377,9 @@ Return ONLY the JSON object. No other text."""
                 pending_intent["items"] = items
 
         if "payment_method" in missing:
-            if "cash" in text_lower:
+            if "cash" in text_lower or "నగదు" in text_lower:
                 pending_intent["payment_method"] = "CASH"
-            elif "card" in text_lower:
+            elif "card" in text_lower or "కార్డ్" in text_lower or "కార్డు" in text_lower:
                 pending_intent["payment_method"] = "CARD"
             elif "voucher" in text_lower:
                 pending_intent["payment_method"] = "VOUCHER"
@@ -341,7 +416,9 @@ Return ONLY the JSON object. No other text."""
 
         return pending_intent
 
-    def _followup_with_llm(self, pending_intent: Dict[str, Any], text: str) -> Optional[Dict[str, Any]]:
+    def _followup_with_llm(
+        self, pending_intent: Dict[str, Any], text: str, language: str
+    ) -> Optional[Dict[str, Any]]:
         """Use LLM to merge follow-up answer into the pending intent."""
         try:
             missing = self.get_missing_fields(pending_intent)
@@ -355,7 +432,8 @@ Return ONLY the JSON object. No other text."""
                 f"Merge the follow-up answer into the command and return the complete JSON intent. "
                 f"Return ONLY valid JSON."
             )
-            raw = self.llm.query(prompt, system_prompt=self.LLM_COMMAND_SYSTEM_PROMPT)
+            system_prompt = self._build_system_prompt(language)
+            raw = self.llm.query(prompt, system_prompt=system_prompt)
             if not raw:
                 return None
 
@@ -386,7 +464,9 @@ Return ONLY the JSON object. No other text."""
 
         return missing
 
-    def get_followup_prompt(self, intent: Dict[str, Any]) -> Optional[str]:
+    def get_followup_prompt(
+        self, intent: Dict[str, Any], language: Optional[str] = None
+    ) -> Optional[str]:
         """Generate a follow-up question for the first missing required field.
 
         Returns None if no fields are missing (intent is complete).
@@ -395,21 +475,61 @@ Return ONLY the JSON object. No other text."""
         if not missing:
             return None
 
-        prompts = [FOLLOW_UP_PROMPTS.get(f, f"Please provide: {f}") for f in missing]
+        lang_key = self._language_key(language or self.primary_language)
+        prompts = [
+            self._get_followup_prompt_text(lang_key, f) for f in missing
+        ]
         return " ".join(prompts)
+
+    def _language_key(self, language: Optional[str]) -> str:
+        if not language:
+            return "en"
+        return language.split("-")[0].lower()
+
+    def _normalize_text(self, text: str, lang_key: str) -> str:
+        normalized = text.lower().strip()
+        if lang_key == "te":
+            normalized = self._replace_telugu_numbers(normalized)
+        # Replace menu synonyms
+        for canonical, synonyms in self._synonym_map.items():
+            for synonym in synonyms:
+                normalized = re.sub(
+                    rf"\b{re.escape(synonym.lower())}\b", canonical, normalized
+                )
+        return normalized
+
+    def _replace_telugu_numbers(self, text: str) -> str:
+        updated = text
+        for telugu, digit in TELUGU_NUMERAL_MAP.items():
+            updated = updated.replace(telugu, digit)
+        return updated
+
+    def _get_followup_prompt_text(self, lang_key: str, field: str) -> str:
+        prompt_map = FOLLOW_UP_PROMPTS.get(lang_key) or FOLLOW_UP_PROMPTS["en"]
+        return (
+            prompt_map.get(field)
+            or FOLLOW_UP_PROMPTS["en"].get(field)
+            or f"Please provide: {field}"
+        )
+
+    def _load_synonym_map(self, file_path: str) -> Dict[str, List[str]]:
+        try:
+            path = Path(file_path)
+            if not path.exists():
+                return {}
+            data = json.loads(path.read_text(encoding="utf-8"))
+            return {k.lower(): [s.lower() for s in v] for k, v in data.items()}
+        except Exception:
+            return {}
 
     # ---- Private parsing methods ----
 
     def _text_mentions_items(self, text: str) -> bool:
         """Quick check: does the text mention any known inventory item names?"""
         try:
-            all_items = self.item_repo.list()
+            return bool(self._extract_items(text))
         except Exception:
             return False
-        for item in all_items:
-            if item.name.lower() in text:
-                return True
-        return False
 
     def _extract_items(self, text: str) -> List[Dict[str, Any]]:
         """Extract item names and quantities from text using fuzzy matching against inventory."""
@@ -419,6 +539,10 @@ Return ONLY the JSON object. No other text."""
             all_items = []
 
         item_names = {item.name.lower(): item for item in all_items}
+        for canonical, synonyms in self._synonym_map.items():
+            if canonical in item_names:
+                for synonym in synonyms:
+                    item_names.setdefault(synonym, item_names[canonical])
         found_items = []
 
         for item_name, item in item_names.items():
@@ -450,7 +574,7 @@ Return ONLY the JSON object. No other text."""
         }
 
         # Extract table number
-        table_match = re.search(r"table\s+(\d+)", text)
+        table_match = re.search(r"(?:table|టేబుల్)\s*(\d+)", text)
         if table_match:
             intent["table_id"] = table_match.group(1)
 
@@ -458,6 +582,10 @@ Return ONLY the JSON object. No other text."""
         if "cash" in text:
             intent["payment_method"] = "CASH"
         elif "card" in text:
+            intent["payment_method"] = "CARD"
+        elif "నగదు" in text:
+            intent["payment_method"] = "CASH"
+        elif "కార్డ్" in text or "కార్డు" in text:
             intent["payment_method"] = "CARD"
 
         # Extract items
@@ -478,6 +606,10 @@ Return ONLY the JSON object. No other text."""
             intent["payment_method"] = "CARD"
         elif "voucher" in text:
             intent["payment_method"] = "VOUCHER"
+        elif "నగదు" in text:
+            intent["payment_method"] = "CASH"
+        elif "కార్డ్" in text or "కార్డు" in text:
+            intent["payment_method"] = "CARD"
 
         return intent
 

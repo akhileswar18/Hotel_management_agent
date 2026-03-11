@@ -2,45 +2,71 @@
 POS (Point of Sale) Screen
 
 Main order entry screen with item picker and order summary.
-Fast, efficient workflow for taking orders.
+Dark theme, emerald accents, touch-friendly (min 48dp).
 """
 
 import flet as ft
 import httpx
 from uuid import uuid4
 from datetime import datetime
+from typing import Callable, Optional
 from src.ui.components.ui_helpers import (
-    HMSButton, ItemPickerWidget, OrderSummaryWidget, HMSColors,
-    show_error_dialog, show_success_dialog, show_success_toast, create_header,
+    HMSButton,
+    OrderSummaryWidget,
+    HMSColors,
+    build_header,
+    tag_chip,
+    status_tag,
+    section_header,
+    show_error_dialog,
+    show_success_dialog,
+    show_success_toast,
     RefreshButton,
 )
+
+# POS color palette — default to light surfaces for readability
+POS_EMERALD = "#10b981"
+POS_BG = HMSColors.BG_PRIMARY
+POS_CARD_BG = HMSColors.BG_SECONDARY
 
 
 class POSScreen(ft.Column):
     """Main POS screen for order entry and payment."""
 
-    def __init__(self, page: ft.Page, user_info: dict, on_logout):
+    def __init__(
+        self,
+        page: ft.Page,
+        user_info: dict,
+        on_logout,
+        on_kitchen_update: Optional[Callable[[dict], None]] = None,
+    ):
         self._page = page
         self.user_info = user_info
         self.on_logout = on_logout
         self.api_base = "http://127.0.0.1:8000"
+        self._on_kitchen_update = on_kitchen_update
 
         # Current order state
         self.current_order = None
         self.current_order_items = []
 
-        # Header
-        header = create_header(
-            page,
-            "POS - Hotel Management System",
-            f"User: {user_info.get('username', 'Unknown')} | {user_info.get('role', 'WAITER')}"
+        # Data for menu card grid
+        self.all_items = []
+        self.active_category = "All"
+        self.category_tabs = ft.Row(spacing=8, scroll=ft.ScrollMode.ALWAYS)
+        self.menu_grid = ft.GridView(runs_count=3, spacing=12, run_spacing=12, expand=True)
+        self.search_field = ft.TextField(
+            hint_text="Search menu items...",
+            width=260,
+            height=48,
+            bgcolor=HMSColors.SURFACE2,
+            border_color=HMSColors.BORDER,
+            color=HMSColors.TEXT_PRIMARY,
+            on_change=lambda e: self._render_menu_grid(),
         )
 
-        # Order summary widget
+        # Order summary widget (right panel)
         self.order_summary = OrderSummaryWidget()
-
-        # Item picker widget
-        self.item_picker = ItemPickerWidget(on_item_selected=self._handle_item_selected)
 
         # Table ID input
         self.table_id_field = ft.TextField(
@@ -56,54 +82,62 @@ class POSScreen(ft.Column):
             "New Order (F2)",
             self._handle_new_order,
             width=150,
-            color=HMSColors.PRIMARY,
+            height=48,
+            color=POS_EMERALD,
         )
 
         self.discount_button = HMSButton(
-            "Apply Discount",
+            "Discount",
             self._handle_discount,
-            width=150,
+            width=145,
+            height=48,
             color=HMSColors.WARNING,
         )
 
         self.finalize_button = HMSButton(
-            "Finalize (F5)",
+            "Finalize & Pay (F5)",
             self._handle_finalize,
-            width=150,
-            color=HMSColors.SUCCESS,
+            width=300,
+            height=52,
+            color=POS_EMERALD,
         )
 
         self.void_button = HMSButton(
             "Void Order",
             self._handle_void,
-            width=150,
+            width=145,
+            height=48,
             color=HMSColors.ERROR,
         )
 
         self.hold_button = HMSButton(
             "Hold (F8)",
             self._handle_hold,
-            width=130,
+            width=145,
+            height=48,
             color=HMSColors.WARNING,
         )
 
         self.resume_button = HMSButton(
             "Resume (F9)",
             self._handle_resume_held,
-            width=130,
-            color=HMSColors.PRIMARY,
+            width=145,
+            height=48,
+            color=HMSColors.BLUE,
         )
 
         self.logout_button = HMSButton(
             "Logout",
             self._handle_logout,
-            width=150,
+            width=110,
+            height=48,
         )
 
         self.voice_button = ft.IconButton(
             icon=ft.icons.MIC,
-            tooltip="Voice order (coming soon)",
+            tooltip="Voice order",
             on_click=self._handle_voice_click,
+            icon_color=HMSColors.BLUE,
         )
 
         # Disable until order created
@@ -112,11 +146,11 @@ class POSScreen(ft.Column):
         self.void_button.disabled = True
         self.hold_button.disabled = True
 
-        # Role-based visibility: hide discount and void for waiters
+        # Role-based visibility (spec): discount for manager/cashier/admin;
+        # void only for manager/admin.
         user_role = user_info.get("role", "WAITER").upper()
-        if user_role == "WAITER":
-            self.discount_button.visible = False
-            self.void_button.visible = False
+        self.discount_button.visible = user_role in ["MANAGER", "CASHIER", "ADMIN"]
+        self.void_button.visible = user_role in ["MANAGER", "ADMIN"]
 
         self.loading = ft.ProgressRing(visible=False)
 
@@ -127,47 +161,95 @@ class POSScreen(ft.Column):
             tooltip="Refresh menu items",
         )
 
-        super().__init__(
+        left_panel = ft.Container(
+            expand=3,
+            bgcolor=HMSColors.SURFACE,
+            border=ft.border.all(1, HMSColors.BORDER),
+            border_radius=12,
+            padding=12,
+            content=ft.Column(
+                [
+                    ft.Row(
+                        [
+                            ft.Text("Table", size=13, color=HMSColors.TEXT_SECONDARY),
+                            self.table_id_field,
+                            self.new_order_button,
+                            ft.Container(expand=True),
+                            self.search_field,
+                            self.refresh_button,
+                        ],
+                        spacing=10,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    ),
+                    section_header("Categories"),
+                    self.category_tabs,
+                    ft.Divider(color=HMSColors.BORDER),
+                    self.menu_grid,
+                ],
+                spacing=10,
+                expand=True,
+            ),
+        )
+
+        right_panel = ft.Container(
+            width=390,
+            bgcolor=HMSColors.SURFACE,
+            border=ft.border.all(1, HMSColors.BORDER),
+            border_radius=12,
+            padding=12,
+            content=ft.Column(
+                [
+                    ft.Row(
+                        [
+                            ft.Text("Current Order", size=15, weight=ft.FontWeight.W_700, color=HMSColors.TEXT_PRIMARY, font_family="Syne"),
+                            ft.Container(expand=True),
+                            self.logout_button,
+                        ],
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    ),
+                    self.order_summary,
+                    ft.Row([self.discount_button, self.hold_button], spacing=10),
+                    ft.Row([self.resume_button, self.void_button], spacing=10),
+                    self.finalize_button,
+                    ft.Row(
+                        [
+                            self.voice_button,
+                            ft.Container(expand=True),
+                            self.loading,
+                        ]
+                    ),
+                ],
+                spacing=10,
+                expand=True,
+            ),
+        )
+
+        _content = ft.Column(
             [
                 ft.Row(
                     [
-                        ft.Text("Table:", size=16, weight="bold"),
-                        self.table_id_field,
-                        self.new_order_button,
-                        ft.Container(expand=True),
-                        self.refresh_button,
-                        self.logout_button,
+                        left_panel,
+                        right_panel,
                     ],
-                    spacing=10,
-                    alignment=ft.MainAxisAlignment.START,
-                ),
-                ft.Divider(),
-                ft.Row(
-                    [
-                        ft.Column([self.order_summary], expand=True),
-                        ft.Column([self.item_picker], expand=True),
-                    ],
-                    spacing=20,
+                    spacing=12,
                     expand=True,
                 ),
-                ft.Divider(),
-                ft.Row(
-                    [
-                        self.discount_button,
-                        self.finalize_button,
-                        self.hold_button,
-                        self.resume_button,
-                        self.void_button,
-                        self.voice_button,
-                        ft.Container(expand=True),
-                        self.loading,
-                    ],
-                    spacing=10,
-                    alignment=ft.MainAxisAlignment.START,
+            ],
+            spacing=0,
+            expand=True,
+        )
+        super().__init__(
+            controls=[
+                build_header("POS / Order Entry", user_info),
+                ft.Container(
+                    content=_content,
+                    bgcolor=POS_BG,
+                    padding=16,
+                    expand=True,
                 ),
             ],
-            spacing=10,
             expand=True,
+            spacing=0,
         )
 
         # Load items on init
@@ -206,10 +288,107 @@ class POSScreen(ft.Column):
                     f"{self.api_base}/api/inventory/items",
                 )
                 if response.status_code == 200:
-                    items = response.json()
-                    self.item_picker.set_items(items)
+                    self.all_items = response.json()
+                    self._render_category_tabs()
+                    self._render_menu_grid()
         except Exception as e:
             pass  # API may not be running yet; items will load when navigated to
+
+    def _render_category_tabs(self):
+        categories = sorted({str(it.get("category", "Other")) for it in self.all_items if it.get("category")})
+        labels = ["All"] + [c.title() for c in categories]
+        self.category_tabs.controls.clear()
+        for label in labels:
+            active = label == self.active_category
+            self.category_tabs.controls.append(
+                ft.Container(
+                    content=tag_chip(
+                        label,
+                        HMSColors.ACCENT if active else HMSColors.SURFACE2,
+                        HMSColors.TEXT_LIGHT if active else HMSColors.TEXT_SECONDARY,
+                    ),
+                    on_click=lambda e, cat=label: self._set_category(cat),
+                )
+            )
+        if self.category_tabs.page:
+            self.category_tabs.update()
+
+    def _set_category(self, category: str):
+        self.active_category = category
+        self._render_category_tabs()
+        self._render_menu_grid()
+
+    def _render_menu_grid(self):
+        search = (self.search_field.value or "").strip().lower()
+        active = self.active_category.lower()
+        self.menu_grid.controls.clear()
+        for item in self.all_items:
+            category = str(item.get("category", "")).lower()
+            name = str(item.get("name", ""))
+            if active != "all" and category != active:
+                continue
+            if search and search not in name.lower():
+                continue
+            self.menu_grid.controls.append(self._build_menu_card(item))
+        if not self.menu_grid.controls:
+            self.menu_grid.controls.append(ft.Text("No menu items found", color=HMSColors.TEXT_SECONDARY))
+        if self.menu_grid.page:
+            self.menu_grid.update()
+
+    def _build_menu_card(self, item: dict) -> ft.Control:
+        stock = int(item.get("stock_on_hand", 0))
+        reorder = int(item.get("reorder_level", 0))
+        is_out = stock <= 0
+        if is_out:
+            stock_text = "✗ Out"
+            stock_color = HMSColors.RED
+        elif stock < reorder:
+            stock_text = f"⚠ Low ({stock})"
+            stock_color = HMSColors.YELLOW
+        else:
+            stock_text = f"✓ In Stock ({stock})"
+            stock_color = HMSColors.GREEN
+
+        def _add(_):
+            self._handle_add_item(str(item.get("id")), str(item.get("name")), 1)
+
+        return ft.Container(
+            bgcolor=HMSColors.SURFACE2,
+            border=ft.border.all(1, HMSColors.BORDER if not is_out else HMSColors.RED + "88"),
+            border_radius=12,
+            padding=12,
+            opacity=0.45 if is_out else 1.0,
+            on_click=None if is_out else _add,
+            content=ft.Column(
+                [
+                    ft.Text(str(item.get("name", "Item")), size=13, weight=ft.FontWeight.W_600, color=HMSColors.TEXT_PRIMARY, max_lines=2, overflow=ft.TextOverflow.ELLIPSIS),
+                    ft.Text(str(item.get("category", "")).title(), size=11, color=HMSColors.TEXT_SECONDARY),
+                    ft.Container(expand=True),
+                    ft.Row(
+                        [
+                            ft.Text(f"Rs.{float(item.get('unit_price', 0.0)):.2f}", size=15, color=HMSColors.ACCENT2, font_family="DM Mono"),
+                            ft.Container(expand=True),
+                            ft.Text(stock_text, size=10, color=stock_color),
+                        ],
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    ),
+                ],
+                spacing=6,
+                expand=True,
+            ),
+        )
+
+    def _emit_kitchen_update(self, payload: Optional[dict] = None):
+        """Forward latest order data to kitchen screen, if callback provided."""
+        if not self._on_kitchen_update:
+            return
+        order_payload = payload or self.current_order
+        if not order_payload:
+            return
+        try:
+            self._on_kitchen_update(order_payload)
+        except Exception:
+            pass
 
     def _handle_new_order(self, e):
         """Create new order."""
@@ -228,6 +407,7 @@ class POSScreen(ft.Column):
                     self.current_order = response.json()
                     self.current_order_items = []
                     self._update_order_display()
+                    self._emit_kitchen_update()
                     self.discount_button.disabled = False
                     self.finalize_button.disabled = False
                     self.void_button.disabled = False
@@ -254,11 +434,16 @@ class POSScreen(ft.Column):
                 if response.status_code == 200:
                     self.current_order = response.json()
                     self._update_order_display()
+                    self._emit_kitchen_update()
                     self._page.update()
                 else:
                     show_error_dialog(self.page, "Error", "Failed to add item")
         except Exception as ex:
             show_error_dialog(self.page, "Error", str(ex))
+
+    def _handle_add_item(self, item_id: str, item_name: str, qty: int):
+        """Compatibility alias preserving the legacy add-item handler name."""
+        self._handle_item_selected(item_id, item_name, qty)
 
     def _handle_discount(self, e):
         """Open discount dialog and apply via API."""
@@ -314,6 +499,7 @@ class POSScreen(ft.Column):
                     if response.status_code == 200:
                         self.current_order = response.json()
                         self._update_order_display()
+                        self._emit_kitchen_update()
                         self._page.update()
                         show_success_dialog(self.page, "Discount Applied",
                             f"Discount of {amount}{'%' if discount_type.value == 'percentage' else ' ₹'} applied")
@@ -363,10 +549,12 @@ class POSScreen(ft.Column):
             value="CASH",
         )
 
+        current_total = self.order_summary.total_value or self.current_order.get("total_amount", 0.0)
         amount_field = ft.TextField(
-            label=f"Amount (₹{self.current_order['total_amount']:.2f})",
-            value=str(self.current_order['total_amount']),
-            read_only=True,
+            label="Amount Tendered (₹)",
+            value=f"{current_total:.2f}",
+            keyboard_type=ft.KeyboardType.NUMBER,
+            hint_text=f"Due: ₹{current_total:.2f}",
         )
 
         def confirm_payment(e):
@@ -376,17 +564,24 @@ class POSScreen(ft.Column):
             self._page.update()
 
             try:
+                try:
+                    paid_amount = float(amount_field.value or current_total)
+                except ValueError:
+                    show_error_dialog(self.page, "Error", "Enter a valid amount")
+                    return
+
                 with httpx.Client(timeout=5.0) as client:
                     response = client.post(
                         f"{self.api_base}/api/sales/orders/{self.current_order['id']}/finalize",
                         json={
                             "payment_method": payment_method.value,
-                            "paid_amount": float(amount_field.value),
+                            "paid_amount": paid_amount,
                             "user_id": self.user_info.get("user_id"),
                         },
                     )
                     if response.status_code == 200:
                         data = response.json()
+                        self._emit_kitchen_update(data)
                         self.current_order = None
                         self._update_order_display()
                         # Show receipt dialog with print option
@@ -481,6 +676,8 @@ class POSScreen(ft.Column):
                         },
                     )
                     if response.status_code == 200:
+                        voided_payload = response.json()
+                        self._emit_kitchen_update(voided_payload)
                         show_success_dialog(self.page, "Order Voided",
                             f"Order has been voided.\nReason: {reason}")
                         self.current_order = None
@@ -531,6 +728,8 @@ class POSScreen(ft.Column):
                     json={"user_id": self.user_info.get("user_id")},
                 )
                 if response.status_code == 200:
+                    held_payload = response.json()
+                    self._emit_kitchen_update(held_payload)
                     show_success_dialog(self.page, "Order Held", "Order has been put on hold.")
                     self.current_order = None
                     self.discount_button.disabled = True
@@ -562,6 +761,10 @@ class POSScreen(ft.Column):
         except Exception as ex:
             show_error_dialog(self.page, "Error", str(ex))
 
+    def _handle_resume(self, e):
+        """Compatibility alias preserving the legacy resume handler name."""
+        self._handle_resume_held(e)
+
     def _show_resume_dialog(self, held_orders: list):
         """Show dialog listing held orders to resume."""
         order_options = []
@@ -591,6 +794,7 @@ class POSScreen(ft.Column):
                     if response.status_code == 200:
                         self.current_order = response.json()
                         self._update_order_display()
+                        self._emit_kitchen_update()
                         self.discount_button.disabled = False
                         self.finalize_button.disabled = False
                         self.void_button.disabled = False
@@ -652,6 +856,7 @@ class POSScreen(ft.Column):
                     if response.status_code == 200:
                         self.current_order = response.json()
                         self._update_order_display()
+                        self._emit_kitchen_update()
                         self._page.update()
                     else:
                         detail = response.json().get("detail", "Failed to update quantity")
@@ -845,6 +1050,7 @@ class POSScreen(ft.Column):
                 if response.status_code == 200:
                     self.current_order = response.json()
                     self._update_order_display()
+                    self._emit_kitchen_update()
                     self._page.update()
                 else:
                     detail = response.json().get("detail", "Failed to remove item")

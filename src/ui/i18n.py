@@ -51,6 +51,47 @@ _translations: Dict[str, Dict[str, str]] = {
         "common.search": "Search",
         "common.back": "Back",
     },
+    "te": {
+        "app.title": "హోటల్ మేనేజ్‌మెంట్ సిస్టం",
+        "pos.new_order": "కొత్త ఆర్డర్",
+        "pos.finalize": "ఫైనల్ చేయి",
+        "pos.hold": "హోల్డ్",
+        "pos.resume": "తిరిగి ప్రారంభించు",
+        "pos.void": "ఆర్డర్ రద్దు",
+        "pos.discount": "డిస్కౌంట్ పెట్టు",
+        "pos.table": "టేబుల్",
+        "pos.items": "ఐటమ్స్",
+        "pos.subtotal": "సబ్‌టొటల్",
+        "pos.tax": "పన్ను (18%)",
+        "pos.total": "మొత్తం",
+        "pos.logout": "లాగ్ అవుట్",
+        "nav.pos": "పీవోఎస్",
+        "nav.products": "ఉత్పత్తులు",
+        "nav.orders": "ఆర్డర్స్",
+        "nav.reports": "రిపోర్ట్స్",
+        "nav.users": "యూజర్లు",
+        "auth.username": "యూజర్ పేరు",
+        "auth.pin": "పిన్ కోడ్",
+        "auth.login": "లాగిన్",
+        "products.add": "కొత్త ఉత్పత్తి",
+        "products.stock_in": "స్టాక్ ఇన్",
+        "reports.sales": "సేల్స్ సమ్మరీ",
+        "reports.inventory": "ఇన్వెంటరీ",
+        "reports.export": "సిఎస్‌వి ఎగుమతి",
+        "users.add": "కొత్త యూజర్",
+        "users.edit_role": "రోల్ మార్చు",
+        "users.reset_pin": "పిన్ రీసెట్",
+        "receipt.print": "రశీదు ముద్రించు",
+        "receipt.email": "రశీదు మెయిల్ చేయి",
+        "receipt.thankyou": "మా దగ్గర భోజనం చేసినందుకు ధన్యవాదాలు!",
+        "common.save": "సేవ్",
+        "common.cancel": "రద్దు",
+        "common.ok": "సరే",
+        "common.error": "లోపం",
+        "common.success": "విజయం",
+        "common.search": "వెతుకు",
+        "common.back": "వెంటకు",
+    },
     "hi": {
         "app.title": "होटल प्रबंधन प्रणाली",
         "pos.new_order": "नया ऑर्डर",
@@ -84,7 +125,7 @@ _translations: Dict[str, Dict[str, str]] = {
     },
 }
 
-# Current language
+# Current language (default English)
 _current_lang = "en"
 
 

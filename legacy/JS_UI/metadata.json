@@ -1,0 +1,7 @@
+{
+  "name": "Agentic HMS - Operational Brain",
+  "description": "An agent-based Hotel & Fast-Food Management System that automates restaurant operations through natural language and intelligent agent collaboration.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}

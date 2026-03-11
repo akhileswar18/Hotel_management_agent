@@ -14,6 +14,7 @@ import sys
 import os
 import time
 import threading
+import socket
 from pathlib import Path
 
 # Ensure project root is on sys.path for imports
@@ -40,7 +41,6 @@ def _start_api_server() -> None:
 
 def _wait_for_api(host: str = "127.0.0.1", port: int = 8000, timeout: float = 15.0) -> bool:
     """Wait for the API server to become responsive."""
-    import socket
 
     start = time.monotonic()
     while time.monotonic() - start < timeout:
@@ -50,6 +50,15 @@ def _wait_for_api(host: str = "127.0.0.1", port: int = 8000, timeout: float = 15
         except OSError:
             time.sleep(0.25)
     return False
+
+
+def _is_port_open(host: str, port: int, timeout: float = 0.5) -> bool:
+    """Check whether a TCP port is currently reachable."""
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except OSError:
+        return False
 
 
 def main() -> None:
@@ -69,8 +78,23 @@ def main() -> None:
     print(f"  Started at {datetime.utcnow().isoformat()}Z")
     print()
 
+    host = os.getenv("API_HOST", "127.0.0.1")
+    api_port = int(os.getenv("API_PORT", "8000"))
+    ui_host = os.getenv("UI_HOST", "127.0.0.1")
+    ui_port = int(os.getenv("UI_PORT", "8080"))
+
+    # Fast-path guard for duplicate launcher runs.
+    api_already_running = _is_port_open(host, api_port)
+    ui_already_running = _is_port_open(ui_host, ui_port)
+    if api_already_running and ui_already_running:
+        print("[0/5] Existing HMS instance detected.")
+        print(f"      API: http://{host}:{api_port}")
+        print(f"      UI:  http://{ui_host}:{ui_port}")
+        print("      Launcher will exit to avoid duplicate bind conflicts.")
+        return
+
     # --- Step 1: Initialize database ---
-    print("[1/4] Initializing database...")
+    print("[1/5] Initializing database...")
     try:
         from src.infrastructure.database import Database
         db = Database()
@@ -79,24 +103,67 @@ def main() -> None:
         print(f"      [FAIL] {e}")
         sys.exit(1)
 
-    # --- Step 2: Start API server in background ---
-    print("[2/4] Starting API server...")
-    api_thread = threading.Thread(target=_start_api_server, daemon=True)
-    api_thread.start()
+    # --- Step 2: Seed default users if none exist ---
+    print("[2/5] Checking for default users...")
+    try:
+        from src.infrastructure import UserRepository
+        from src.application import AuthService
+        from src.domain import User, Role
+        from uuid import uuid4
+        from datetime import datetime
 
-    # --- Step 3: Wait for API ---
-    host = os.getenv("API_HOST", "127.0.0.1")
-    port = int(os.getenv("API_PORT", "8000"))
-    print(f"[3/4] Waiting for API on {host}:{port}...")
+        user_repo = UserRepository()
+        users = user_repo.list()
+        if not users:
+            auth_service = AuthService()
+            for username, pin, role in [
+                ("waiter", "1234", Role.WAITER),
+                ("cashier", "1234", Role.CASHIER),
+                ("manager", "1234", Role.MANAGER),
+                ("clerk", "1234", Role.CLERK),
+            ]:
+                pin_hash = auth_service.hash_pin(pin)
+                user = User(
+                    id=uuid4(),
+                    username=username,
+                    role=role,
+                    created_at=datetime.utcnow(),
+                    updated_at=datetime.utcnow(),
+                    created_by=None,
+                    updated_by=None,
+                )
+                user_repo.create(user, pin_hash)
+            print("      [OK] Created default users (e.g. cashier / 1234)")
+        else:
+            print("      [OK] Users already exist")
+    except Exception as e:
+        print(f"      [WARN] Could not seed users: {e}")
 
-    if _wait_for_api(host, port):
-        print(f"      [OK] API ready at http://{host}:{port}")
+    # --- Step 3: Start API server in background ---
+    if api_already_running:
+        print(f"[3/5] Starting API server...")
+        print(f"      [SKIP] API already running on {host}:{api_port}")
+    else:
+        print("[3/5] Starting API server...")
+        api_thread = threading.Thread(target=_start_api_server, daemon=True)
+        api_thread.start()
+
+    # --- Step 4: Wait for API ---
+    print(f"[4/5] Waiting for API on {host}:{api_port}...")
+
+    if _wait_for_api(host, api_port):
+        print(f"      [OK] API ready at http://{host}:{api_port}")
     else:
         print("      [WARN] API not responding yet — UI will retry connections")
 
-    # --- Step 4: Start Flet UI (blocks) ---
-    print("[4/4] Starting UI...")
+    # --- Step 5: Start Flet UI (blocks) ---
+    print("[5/5] Starting UI...")
     print()
+    if ui_already_running:
+        print(f"UI already running at http://{ui_host}:{ui_port}")
+        print("Launcher will exit to avoid duplicate UI bind conflicts.")
+        return
+
     try:
         from src.ui.app import main as flet_main
         flet_main()

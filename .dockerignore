@@ -5,12 +5,15 @@
 
 # Version control
 .git
+.git/
 .gitignore
 
 # Virtual environment
 venv/
 env/
 ENV/
+.venv/
+node_modules/
 
 # IDE / editor
 .vscode/
@@ -31,6 +34,7 @@ __pycache__/
 # Build artifacts
 build/
 dist/
+coverage/
 *.egg-info/
 *.egg
 *.spec
@@ -55,6 +59,7 @@ logs/
 .env
 .env.local
 .env.*.local
+.env*
 
 # Documentation (not needed in image)
 *.md
@@ -77,6 +82,10 @@ Thumbs.db
 *.tmp
 *.bak
 tmpclaude-*
+
+# Docker build context files
+Dockerfile*
+.dockerignore
 
 # Generated reports
 *.csv

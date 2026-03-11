@@ -29,6 +29,7 @@
    - 4.9 PrintAgent
    - 4.10 NotificationAgent
    - 4.11 ReportingAgent
+   - 4.12 WatchdogAgent
 5. [LLM Integration](#5-llm-integration)
    - 5.1 LLMClient
    - 5.2 IntentParser (Two-Tier Parsing)
@@ -121,11 +122,11 @@ The HMS uses an **in-process, event-driven agent architecture** built on top of 
 │  │  │llm: no     │ │llm: no       │ │llm: no       │ │llm: no      │ │     │
 │  │  └────────────┘ └──────────────┘ └──────────────┘ └─────────────┘ │     │
 │  │                                                                     │     │
-│  │  ┌────────────┐ ┌──────────────┐ ┌──────────────┐                  │     │
-│  │  │ReportAgent │ │ PrintAgent   │ │  AuditAgent  │                  │     │
-│  │  │writes: no  │ │writes: no    │ │writes: yes   │                  │     │
-│  │  │llm: no     │ │degradable    │ │sub: wildcard │                  │     │
-│  │  └────────────┘ └──────────────┘ └──────────────┘                  │     │
+│  │  ┌────────────┐ ┌──────────────┐ ┌──────────────┐ ┌──────────────┐     │
+│  │  │ReportAgent │ │ PrintAgent   │ │  AuditAgent  │ │ WatchdogAgent│     │
+│  │  │writes: no  │ │writes: no    │ │writes: yes   │ │ retry/queue  │     │
+│  │  │llm: no     │ │degradable    │ │sub: wildcard │ │ restart      │     │
+│  │  └────────────┘ └──────────────┘ └──────────────┘ └──────────────┘     │
 │  └─────────────────────────────────────────────────────────────────────┘     │
 │                                                                              │
 │  ┌─────────────────────────────────────────────────────────────────────┐     │
@@ -723,6 +724,29 @@ class NotificationAgent(BaseAgent):
 | Subscribes to | `report.daily_sales`, `report.inventory`, `report.transactions`, `report.export_csv` |
 | Publishes | `report.generated`, `report.exported`, `report.error` |
 
+### 4.12 WatchdogAgent
+
+**File**: `src/agents/watchdog_agent.py`  
+**Role**: Monitors and auto-recovers from known failure modes. Explicit recovery logic only — no AI; predictable failures with known fixes.
+
+| Property | Value |
+|----------|-------|
+| Subscribes to | (periodic / triggered by infrastructure; or `watchdog.check`, `system.printer_failed`, `system.agent_unhealthy`, `system.db_lock`) |
+| Publishes | (recovery actions: retry, queue, restart, backoff) |
+| Writes to DB | No (or only audit of recovery actions) |
+| Uses LLM | No |
+
+**Recovery behaviors**:
+
+| Failure mode | Detection | Recovery |
+|--------------|-----------|----------|
+| **API timeout** (LLM) | IntentParser / LLMClient timeout or error | Retry up to 3 times → fallback to rule-based parsing (IntentParser already does this; Watchdog can emit metrics or trigger retries at API layer) |
+| **Printer failure** | PrintAgent or infrastructure signals failure | Queue the bill (persist to queue table or in-memory queue); retry when printer reconnects (health check or explicit "printer ready" event) |
+| **Agent crash** | Handler exception, unhandled error, or health check failure | Auto-restart the agent (re-register handler with EventBus, or process restart if out-of-process) |
+| **Database lock** | SQLite `OperationalError` / lock timeout | Wait with backoff and retry (e.g. 3 retries with 100ms, 500ms, 2s delay) |
+
+Implementation is explicit: timeouts, retry counts, and backoff are configured constants or env vars; no LLM or heuristic decisions. See [JS_TO_FLET_MIGRATION_PLAN.md](JS_TO_FLET_MIGRATION_PLAN.md) for adding WatchdogAgent during the JS-to-Flet migration.
+
 ---
 
 ## 5. LLM Integration
@@ -972,6 +996,32 @@ Check missing required fields
         └── report → ReportingService directly
 ```
 
+**Failure path (step 3: LLM or parse fails)**:
+
+```
+API receives parse request
+  │
+  ▼
+IntentParser.parse(text)
+  │
+  ├── LLM call (e.g. Groq/OpenAI)
+  │     ├── Success → return intent (_parsed_by="llm")
+  │     ├── Timeout / garbage / error
+  │     │     └── Fallback: _parse_rule_based(text)
+  │     │           ├── Rule-based returns valid intent → return intent (_parsed_by="rules")
+  │     │           └── Rule-based also fails (action="unknown" or missing fields and no follow-up)
+  │     │                 └── Return error to API
+  │     │
+  │     └── API returns { status: "error", message: "..." }
+  │
+  ▼
+ChatOrderScreen (or Chat screen)
+  │
+  └── On error: show "Sorry, couldn't understand. Try again or use the menu buttons."
+```
+
+So: **LLM fails → fallback to rule-based parser → still returns intent** if rules can parse; **rule-based also fails → return error → UI shows friendly message** and user can retry or use POS/menu. The ChatOrderScreen (or Chat screen) displays: *"Sorry, couldn't understand. Try again or use the menu buttons."* — see [JS_TO_FLET_MIGRATION_PLAN.md](JS_TO_FLET_MIGRATION_PLAN.md) for migration implementation.
+
 ---
 
 ## 7. Agent Subscription Map
@@ -1024,6 +1074,11 @@ notification.toast      │ NotificationAgent, AuditAgent(*)
 notification.error      │ NotificationAgent, AuditAgent(*)
                         │
 workflow.multi_step     │ OrchestratorAgent, AuditAgent(*)
+                        │
+watchdog.check          │ WatchdogAgent (periodic / on-demand health checks)
+system.printer_failed   │ WatchdogAgent (queue bill, retry when printer ready)
+system.agent_unhealthy  │ WatchdogAgent (auto-restart agent)
+system.db_lock          │ WatchdogAgent (wait + retry with backoff)
 ────────────────────────┴──────────────────────────────────────
 (*) AuditAgent subscribes to wildcard "*" — receives ALL events
 (auto) = auto re-dispatched by EventBus
@@ -1112,7 +1167,8 @@ src/
 │   ├── auth_agent.py                # AuthAgent
 │   ├── print_agent.py               # PrintAgent
 │   ├── notification_agent.py        # NotificationAgent
-│   └── reporting_agent.py           # ReportingAgent
+│   ├── reporting_agent.py           # ReportingAgent
+│   └── watchdog_agent.py           # WatchdogAgent (retry, queue, restart, db lock)
 │
 ├── events/                          # Event infrastructure
 │   ├── __init__.py
