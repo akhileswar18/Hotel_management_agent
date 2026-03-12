@@ -31,17 +31,20 @@ class ProductsScreen(ft.Column):
         self.items_list = ft.Column(spacing=8, expand=True, scroll=ft.ScrollMode.AUTO)
         self.alerts_list = ft.Column(spacing=8)
         self.ledger_list = ft.Column(spacing=6)
-        self.snapshot_grid = ft.Row(spacing=8, wrap=True)
+        self.snapshot_container = ft.Container(
+            padding=ft.padding.symmetric(horizontal=4, vertical=2),
+            content=ft.Text("Loading...", size=11, color="#4B5675"),
+        )
 
         add_product_button = HMSButton("Add New Item", self._handle_add_product, height=48, color=MENU_EMERALD, width=150)
         stock_in_button = HMSButton("Record Stock-In", self._handle_stock_in, color=HMSColors.BLUE, width=150, height=48)
 
         self.category_filter = ft.Dropdown(
             label="Category",
-            options=[ft.dropdown.Option("", "All Categories")],
-            value="",
             width=200,
+            value=None,
             on_change=self._handle_category_filter,
+            options=[],
             bgcolor=HMSColors.SURFACE2,
             border_color=HMSColors.BORDER,
             color=HMSColors.TEXT_PRIMARY,
@@ -64,7 +67,7 @@ class ProductsScreen(ft.Column):
                     self.category_filter,
                     ft.Divider(color=HMSColors.BORDER),
                     section_header("Snapshot"),
-                    self.snapshot_grid,
+                    self.snapshot_container,
                 ],
                 spacing=10,
                 expand=True,
@@ -118,35 +121,53 @@ class ProductsScreen(ft.Column):
 
     def _handle_category_filter(self, e):
         """Filter items by category."""
-        category = self.category_filter.value
-        self._load_items(category=category)
+        selected = self.category_filter.value or ""
+        self._load_items(category=selected)
+
+    def _rebuild_category_dropdown(self):
+        categories = sorted(
+            set(
+                item.get("category", "").strip()
+                for item in self.items
+                if item.get("category", "").strip()
+            )
+        )
+
+        new_options = [ft.dropdown.Option(key="", text="All Categories")]
+        for cat in categories:
+            new_options.append(ft.dropdown.Option(key=cat, text=cat))
+
+        self.category_filter.options = new_options
+
+        valid_keys = [""] + categories
+        if self.category_filter.value not in valid_keys:
+            self.category_filter.value = ""
+
+        try:
+            self.category_filter.update()
+        except Exception:
+            pass
 
     def _load_items(self, category: str = ""):
         """Load products from API with optional category filter."""
         try:
-            params = {}
-            if category:
-                params["category"] = category
             with httpx.Client(timeout=5.0) as client:
-                response = client.get(
-                    f"{self.api_base}/api/inventory/items",
-                    params=params,
-                )
+                response = client.get(f"{self.api_base}/api/inventory/items")
                 if response.status_code == 200:
-                    self.items = response.json()
-                    self._sync_category_options()
+                    all_items = response.json()
+                    self.items = all_items
+                    self._rebuild_category_dropdown()
                     self._load_ledger(client)
-                    self._display_items()
+                    if category:
+                        display_items = [
+                            item for item in all_items
+                            if item.get("category", "") == category
+                        ]
+                    else:
+                        display_items = all_items
+                    self._display_items(display_items)
         except Exception as e:
             pass
-
-    def _sync_category_options(self):
-        categories = sorted({str(item.get("category", "other")) for item in self.items})
-        opts = [ft.dropdown.Option("", "All Categories")]
-        opts.extend(ft.dropdown.Option(cat, cat.title()) for cat in categories if cat)
-        self.category_filter.options = opts
-        if self.category_filter.page:
-            self.category_filter.update()
 
     def _load_ledger(self, client: httpx.Client):
         try:
@@ -159,18 +180,44 @@ class ProductsScreen(ft.Column):
         except Exception:
             self.ledger_entries = []
 
-    def _display_items(self):
+    def _build_snapshot(self) -> ft.Control:
+        items = self.items
+
+        total = len(items)
+        in_stock = sum(1 for i in items if i.get("stock_on_hand", 0) > i.get("reorder_level", 0))
+        low_stock = sum(1 for i in items if 0 < i.get("stock_on_hand", 0) <= i.get("reorder_level", 0))
+        out_stock = sum(1 for i in items if i.get("stock_on_hand", 0) <= 0)
+
+        def snap_row(label, value, color):
+            return ft.Row(
+                [
+                    ft.Text(label, size=12, color="#8B96B0", expand=True),
+                    ft.Text(str(value), size=12, weight=ft.FontWeight.W_700, color=color, font_family="DM Mono"),
+                ],
+                alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+            )
+
+        return ft.Column(
+            [
+                ft.Text("SNAPSHOT", size=10, weight=ft.FontWeight.W_600, color="#4B5675", letter_spacing=1.2),
+                snap_row("Total Items", total, "#F0F4FF"),
+                snap_row("Low Stock", low_stock, "#EAB308"),
+                snap_row("Out of Stock", out_stock, "#EF4444"),
+                snap_row("In Stock", in_stock, "#22C55E"),
+            ],
+            spacing=4,
+            tight=True,
+        )
+
+    def _display_items(self, items=None):
         """Display items in list."""
+        if items is None:
+            items = self.items
         self.items_list.controls.clear()
         self.alerts_list.controls.clear()
-        self.snapshot_grid.controls.clear()
         self.ledger_list.controls.clear()
 
-        in_stock = 0
-        low_stock = 0
-        out_stock = 0
-
-        for item in self.items:
+        for item in items:
             stock = int(item.get("stock_on_hand", 0))
             reorder = int(item.get("reorder_level", 10))
 
@@ -178,15 +225,12 @@ class ProductsScreen(ft.Column):
             if stock <= 0:
                 stock_color = HMSColors.ERROR
                 stock_badge = "OUT"
-                out_stock += 1
             elif stock < reorder:
                 stock_color = HMSColors.WARNING
                 stock_badge = "LOW"
-                low_stock += 1
             else:
                 stock_color = HMSColors.SUCCESS
                 stock_badge = "IN STOCK"
-                in_stock += 1
 
             item_id = item.get("id", "")
             row = ft.Container(
@@ -243,31 +287,11 @@ class ProductsScreen(ft.Column):
                     )
                 )
 
-        total = len(self.items)
-        def snap_tile(label: str, value: int, color: str) -> ft.Container:
-            return ft.Container(
-                width=118,
-                height=70,
-                bgcolor=HMSColors.SURFACE2,
-                border=ft.border.all(1, HMSColors.BORDER),
-                border_radius=8,
-                padding=8,
-                content=ft.Column(
-                    [
-                        ft.Text(str(value), size=20, weight=ft.FontWeight.W_700, color=color, font_family="Syne"),
-                        ft.Text(label, size=11, color=HMSColors.TEXT_SECONDARY),
-                    ],
-                    spacing=2,
-                    tight=True,
-                ),
-            )
-
-        self.snapshot_grid.controls = [
-            snap_tile("In Stock", in_stock, HMSColors.GREEN),
-            snap_tile("Low", low_stock, HMSColors.YELLOW),
-            snap_tile("Out", out_stock, HMSColors.RED),
-            snap_tile("Total", total, HMSColors.BLUE),
-        ]
+        self.snapshot_container.content = self._build_snapshot()
+        try:
+            self.snapshot_container.update()
+        except Exception:
+            pass
 
         if not self.alerts_list.controls:
             self.alerts_list.controls.append(ft.Text("No critical alerts", color=HMSColors.TEXT_SECONDARY, size=12))
@@ -287,7 +311,7 @@ class ProductsScreen(ft.Column):
                     activity_item(et, str(entry.get("description", "Stock activity")), ts, color)
                 )
 
-        for ctl in [self.items_list, self.alerts_list, self.snapshot_grid, self.ledger_list]:
+        for ctl in [self.items_list, self.alerts_list, self.ledger_list]:
             try:
                 if ctl.page:
                     ctl.update()

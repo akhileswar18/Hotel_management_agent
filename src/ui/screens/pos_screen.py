@@ -54,7 +54,14 @@ class POSScreen(ft.Column):
         self.all_items = []
         self.active_category = "All"
         self.category_tabs = ft.Row(spacing=8, scroll=ft.ScrollMode.ALWAYS)
-        self.menu_grid = ft.GridView(runs_count=3, spacing=12, run_spacing=12, expand=True)
+        self.menu_grid = ft.GridView(
+            runs_count=3,
+            max_extent=300,
+            child_aspect_ratio=1.4,
+            spacing=12,
+            run_spacing=12,
+            expand=True,
+        )
         self.search_field = ft.TextField(
             hint_text="Search menu items...",
             width=260,
@@ -353,27 +360,43 @@ class POSScreen(ft.Column):
             self._handle_add_item(str(item.get("id")), str(item.get("name")), 1)
 
         return ft.Container(
+            height=130,
             bgcolor=HMSColors.SURFACE2,
             border=ft.border.all(1, HMSColors.BORDER if not is_out else HMSColors.RED + "88"),
-            border_radius=12,
+            border_radius=10,
             padding=12,
             opacity=0.45 if is_out else 1.0,
             on_click=None if is_out else _add,
             content=ft.Column(
                 [
-                    ft.Text(str(item.get("name", "Item")), size=13, weight=ft.FontWeight.W_600, color=HMSColors.TEXT_PRIMARY, max_lines=2, overflow=ft.TextOverflow.ELLIPSIS),
+                    ft.Text(
+                        str(item.get("name", "Item")),
+                        size=13,
+                        weight=ft.FontWeight.W_600,
+                        color=HMSColors.TEXT_PRIMARY,
+                        max_lines=2,
+                        overflow=ft.TextOverflow.ELLIPSIS,
+                    ),
                     ft.Text(str(item.get("category", "")).title(), size=11, color=HMSColors.TEXT_SECONDARY),
                     ft.Container(expand=True),
                     ft.Row(
                         [
-                            ft.Text(f"Rs.{float(item.get('unit_price', 0.0)):.2f}", size=15, color=HMSColors.ACCENT2, font_family="DM Mono"),
+                            ft.Text(
+                                f"Rs.{float(item.get('unit_price', 0.0)):.2f}",
+                                size=14,
+                                weight=ft.FontWeight.W_600,
+                                color=HMSColors.ACCENT2,
+                                font_family="DM Mono",
+                            ),
                             ft.Container(expand=True),
-                            ft.Text(stock_text, size=10, color=stock_color),
+                            ft.Text(stock_text, size=11, color=stock_color),
                         ],
+                        alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
                         vertical_alignment=ft.CrossAxisAlignment.CENTER,
                     ),
                 ],
-                spacing=6,
+                spacing=4,
+                tight=True,
                 expand=True,
             ),
         )

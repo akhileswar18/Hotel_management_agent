@@ -1,264 +1,614 @@
 """
-Order History Screen
+Kitchen Display Screen
 
-View past orders with search by status and date.
+Rebuilt KDS ticket board used from the sidebar Kitchen entry.
 """
+
+from datetime import datetime, timezone
+import threading
+from typing import Callable, Optional
 
 import flet as ft
 import httpx
-from datetime import date
-from src.ui.components.ui_helpers import (
-    HMSButton, HMSColors, show_error_dialog, show_success_dialog, show_success_toast, create_header,
-    RefreshButton,
-)
+
+from src.ui.components.ui_helpers import HMSColors
 
 
 class OrderHistoryScreen(ft.Column):
-    """Order history screen with search and filters."""
+    """Kitchen Display System board."""
 
-    def __init__(self, page: ft.Page, user_info: dict, on_back):
+    def __init__(self, page: ft.Page, user_info: Optional[dict], on_back: Callable[[], None]):
+        self.page = page
         self._page = page
-        self.user_info = user_info
+        self.user_info = user_info or {}
         self.on_back = on_back
-        self.api_base = "http://127.0.0.1:8000"
+        self.api_url = "http://127.0.0.1:8000"
+        self._orders: list[dict] = []
+        self._refresh_timer: Optional[threading.Timer] = None
+        self._clock_timer: Optional[threading.Timer] = None
 
-        # Filters
-        self.status_filter = ft.Dropdown(
-            label="Status",
-            options=[
-                ft.dropdown.Option("", "All"),
-                ft.dropdown.Option("draft", "Draft"),
-                ft.dropdown.Option("held", "Held"),
-                ft.dropdown.Option("finalized", "Finalized"),
-                ft.dropdown.Option("voided", "Voided"),
-            ],
-            value="",
-            width=160,
-            on_change=self._handle_filter_change,
+        self._title = ft.Text(
+            "Kitchen Display System",
+            font_family="Syne",
+            size=18,
+            weight=ft.FontWeight.W_800,
+            color="#F9FAFB",
         )
-
-        self.date_filter = ft.TextField(
-            label="Date (YYYY-MM-DD)",
-            hint_text="e.g. 2026-02-11",
-            width=180,
-            height=48,
-            text_size=14,
-            value="",
+        self._urgent_badge = self._status_badge("0 URGENT", "#EF4444")
+        self._pending_badge = self._status_badge("0 PENDING", "#EAB308")
+        self._ready_badge = self._status_badge("0 READY", "#22C55E")
+        self._clock_text = ft.Text(
+            datetime.now().strftime("%H:%M:%S"),
+            size=22,
+            font_family="DM Mono",
+            color="#FFB347",
         )
-
-        search_btn = HMSButton(
-            "Search",
-            self._handle_search,
-            width=100,
-            color=HMSColors.PRIMARY,
-        )
-
-        today_btn = HMSButton(
-            "Today",
-            self._handle_today,
-            width=80,
-            color=HMSColors.PRIMARY,
-        )
-
-        all_btn = HMSButton(
-            "Show All",
-            self._handle_show_all,
-            width=100,
-        )
-
-        back_button = HMSButton(
-            "Back to POS",
-            lambda e: on_back(),
-        )
-
-        # Refresh button
-        self.refresh_button = RefreshButton(
-            on_refresh=self._load_orders,
-            page=self._page,
-            tooltip="Refresh orders",
-        )
-
-        # Orders list
-        self.orders_list = ft.ListView(
-            spacing=8,
+        self._grid = ft.GridView(
+            runs_count=4,
+            spacing=14,
+            run_spacing=14,
+            padding=ft.padding.all(16),
             expand=True,
         )
-
-        self.order_count_text = ft.Text("0 orders found", size=13, color=HMSColors.TEXT_SECONDARY)
+        self.ticket_grid = self._grid
+        self.urgent_stat = ft.Text("0", font_family="Syne", size=22, weight=ft.FontWeight.W_800, color="#EF4444")
+        self.cooking_stat = ft.Text("0", font_family="Syne", size=22, weight=ft.FontWeight.W_800, color="#EAB308")
+        self.ready_stat = ft.Text("0", font_family="Syne", size=22, weight=ft.FontWeight.W_800, color="#22C55E")
+        self._stats_row = ft.Row(
+            spacing=24,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        )
 
         super().__init__(
-            [
-                ft.Row(
-                    [
-                        ft.Text("Order History", size=20, weight="bold"),
-                        ft.Container(expand=True),
-                        self.refresh_button,
-                        back_button,
-                    ],
-                    spacing=10,
-                ),
-                ft.Divider(),
-                ft.Row(
-                    [
-                        self.status_filter,
-                        self.date_filter,
-                        search_btn,
-                        today_btn,
-                        all_btn,
-                        ft.Container(expand=True),
-                        self.order_count_text,
-                    ],
-                    spacing=10,
-                    alignment=ft.MainAxisAlignment.START,
-                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                ),
-                ft.Divider(),
-                self.orders_list,
+            controls=[
+                ft.Container(
+                    expand=True,
+                    bgcolor="#0A0E14",
+                    content=ft.Column(
+                        [
+                            self._build_header(),
+                            self._grid,
+                            self._build_stats_bar(),
+                        ],
+                        spacing=0,
+                        expand=True,
+                    ),
+                )
             ],
-            spacing=10,
+            spacing=0,
             expand=True,
         )
 
-        # Load recent orders
         self._load_orders()
+        self._render_orders()
+        self._update_clock()
+        self._schedule_refresh()
 
-    def _handle_filter_change(self, e):
-        self._load_orders()
+    def _build_header(self) -> ft.Container:
+        return ft.Container(
+            height=60,
+            bgcolor="#111827",
+            border=ft.border.only(bottom=ft.BorderSide(2, "#1F2937")),
+            padding=ft.padding.symmetric(horizontal=16),
+            content=ft.Row(
+                [
+                    ft.Text("🍳", size=18),
+                    self._title,
+                    self._urgent_badge,
+                    self._pending_badge,
+                    self._ready_badge,
+                    ft.Container(expand=True),
+                    ft.Text("AUTO REFRESH: 30s", size=11, color="#4B5675", font_family="DM Mono"),
+                    ft.TextButton(
+                        "Refresh",
+                        on_click=lambda e: self._refresh(),
+                        style=ft.ButtonStyle(color="#8B96B0"),
+                    ),
+                    self._clock_text,
+                ],
+                spacing=12,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            ),
+        )
 
-    def _handle_search(self, e):
-        self._load_orders()
+    def _build_stats_bar(self) -> ft.Container:
+        return ft.Container(
+            height=52,
+            bgcolor="#111827",
+            border=ft.border.only(top=ft.BorderSide(1, "#1F2937")),
+            padding=ft.padding.symmetric(horizontal=24),
+            content=self._stats_row,
+        )
 
-    def _handle_today(self, e):
-        self.date_filter.value = date.today().isoformat()
-        self._load_orders()
+    def _status_badge(self, text: str, color: str) -> ft.Container:
+        return ft.Container(
+            bgcolor=color + "20",
+            border=ft.border.all(1, color),
+            border_radius=6,
+            padding=ft.padding.symmetric(horizontal=10, vertical=4),
+            content=ft.Text(text, size=12, weight=ft.FontWeight.W_700, color=color),
+        )
+
+    def _kstat(self, num: str, label: str, color: str) -> ft.Row:
+        return ft.Row(
+            [
+                ft.Text(num, font_family="Syne", size=22, weight=ft.FontWeight.W_800, color=color),
+                ft.Text(label, size=10, color="#6B7280"),
+            ],
+            spacing=8,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        )
+
+    def _kstat_control(self, num_text: ft.Text, label: str) -> ft.Row:
+        return ft.Row(
+            [
+                num_text,
+                ft.Text(label, size=10, color="#6B7280"),
+            ],
+            spacing=8,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        )
+
+    def _vert_sep(self) -> ft.Container:
+        return ft.Container(width=1, height=30, bgcolor="#1F2937")
+
+    def _safe_update(self, control: ft.Control):
         try:
-            self._page.update()
+            if control.page:
+                control.update()
         except Exception:
             pass
 
-    def _handle_show_all(self, e):
-        self.status_filter.value = ""
-        self.date_filter.value = ""
-        self._load_orders()
+    def _show_snackbar(self, message: str, bgcolor: str):
+        self.page.snack_bar = ft.SnackBar(content=ft.Text(message), bgcolor=bgcolor)
+        self.page.snack_bar.open = True
         try:
-            self._page.update()
+            self.page.update()
         except Exception:
             pass
 
-    def _handle_reprint(self, order: dict):
-        """Reprint receipt for a finalized order."""
-        try:
-            from src.infrastructure.printer import ESCPOSPrinter
-            printer = ESCPOSPrinter()
-            filepath = printer.print_receipt(order)
-            show_success_toast(self._page, f"Receipt saved: {filepath}")
-        except Exception as err:
-            show_error_dialog(self._page, "Print Error", str(err))
+    def _parse_created_at(self, order: dict) -> datetime:
+        raw = str(order.get("created_at") or "").strip()
+        if raw:
+            try:
+                return datetime.fromisoformat(raw.replace("Z", "+00:00")).replace(tzinfo=None)
+            except Exception:
+                pass
+        return datetime.now()
+
+    def _elapsed_parts(self, order: dict) -> tuple[float, float, int]:
+        created_at = self._parse_created_at(order)
+        elapsed_seconds = max((datetime.now() - created_at).total_seconds(), 0.0)
+        elapsed_min = elapsed_seconds / 60.0
+        return elapsed_seconds, elapsed_min, int(elapsed_seconds % 60)
 
     def _load_orders(self):
-        """Load orders from API with filters."""
         try:
-            params = {}
-            if self.status_filter.value:
-                params["status"] = self.status_filter.value
-            if self.date_filter.value.strip():
-                params["date"] = self.date_filter.value.strip()
-
-            with httpx.Client(timeout=5.0) as client:
-                response = client.get(
-                    f"{self.api_base}/api/sales/orders",
-                    params=params,
-                )
+            with httpx.Client(base_url=self.api_url, timeout=5.0) as client:
+                response = client.get("/api/sales/orders", params={"status": "finalized"})
                 if response.status_code == 200:
-                    orders = response.json()
-                    self._display_orders(orders)
+                    all_orders = response.json()
+                    self._orders = [
+                        order for order in all_orders
+                        if (order.get("kitchen_status") or "PENDING").upper() != "SERVED"
+                    ]
+                    self._orders.sort(key=lambda o: o.get("created_at", ""))
+                else:
+                    self._orders = []
         except Exception:
-            pass
+            self._orders = []
 
-    def _display_orders(self, orders: list):
-        """Display orders in the list."""
-        self.orders_list.controls.clear()
-        self.order_count_text.value = f"{len(orders)} order(s) found"
+    def _compute_stats(self) -> dict:
+        urgent_count = 0
+        pending_count = 0
+        ready_count = 0
+        total_seconds = 0.0
 
-        if not orders:
-            self.orders_list.controls.append(
+        for order in self._orders:
+            elapsed_seconds, elapsed_min, _ = self._elapsed_parts(order)
+            total_seconds += elapsed_seconds
+            kitchen_status = (order.get("kitchen_status") or "PENDING").upper()
+            if elapsed_min > 15:
+                urgent_count += 1
+            if kitchen_status in {"PENDING", "COOKING"}:
+                pending_count += 1
+            if kitchen_status == "READY":
+                ready_count += 1
+
+        count = len(self._orders)
+        avg_seconds = int(total_seconds / count) if count else 0
+        return {
+            "urgent_count": urgent_count,
+            "pending_count": pending_count,
+            "ready_count": ready_count,
+            "in_progress_count": pending_count,
+            "avg_prep_min": avg_seconds // 60,
+            "avg_prep_sec": avg_seconds % 60,
+            "orders_today": count,
+        }
+
+    def _build_kds_item(self, item: dict) -> ft.Row:
+        qty = item.get("quantity", 1)
+        name = item.get("item_name", "Unknown")
+        return ft.Row(
+            [
                 ft.Container(
-                    content=ft.Text("No orders found", size=14, color=HMSColors.TEXT_SECONDARY),
-                    padding=20,
+                    width=28,
+                    height=28,
+                    border_radius=6,
+                    bgcolor="#2D3748",
                     alignment=ft.alignment.center,
+                    content=ft.Text(
+                        str(qty),
+                        font_family="Syne",
+                        size=14,
+                        weight=ft.FontWeight.W_700,
+                        color="white",
+                        text_align=ft.TextAlign.CENTER,
+                    ),
+                ),
+                ft.Text(name, size=14, weight=ft.FontWeight.W_500, color="#E5E7EB", expand=True),
+            ],
+            spacing=8,
+        )
+
+    def _kds_btn(self, label: str, bgcolor: str, color: str, on_click) -> ft.ElevatedButton:
+        return ft.ElevatedButton(
+            label,
+            bgcolor=bgcolor,
+            color=color,
+            style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=6)),
+            expand=True,
+            height=36,
+            on_click=on_click,
+        )
+
+    def _elapsed_min(self, order: dict) -> float:
+        try:
+            created = datetime.fromisoformat(str(order["created_at"]).replace("Z", "+00:00"))
+            now = datetime.now(timezone.utc)
+            return (now - created).total_seconds() / 60
+        except Exception:
+            return 0.0
+
+    def _show_snack(self, msg: str, error: bool = False):
+        self._page.snack_bar = ft.SnackBar(
+            content=ft.Text(msg, color="white"),
+            bgcolor="#EF4444" if error else "#22C55E",
+            duration=2000,
+        )
+        self._page.snack_bar.open = True
+        self._page.update()
+
+    def _rebuild_grid(self):
+        self.ticket_grid.controls = [self._build_ticket_card(order) for order in self._orders]
+        if not self.ticket_grid.controls:
+            self.ticket_grid.controls = [
+                ft.Container(
+                    bgcolor="#111827",
+                    border=ft.border.all(1, "#1F2937"),
+                    border_radius=12,
+                    padding=24,
+                    content=ft.Text("No kitchen tickets right now.", size=16, color="#8B96B0"),
                 )
+            ]
+        urgent = sum(1 for order in self._orders if self._elapsed_min(order) > 15)
+        cooking = sum(1 for order in self._orders if (order.get("kitchen_status") or "").upper() == "COOKING")
+        ready = sum(1 for order in self._orders if (order.get("kitchen_status") or "").upper() == "READY")
+        self.urgent_stat.value = str(urgent)
+        self.cooking_stat.value = str(cooking)
+        self.ready_stat.value = str(ready)
+        self._urgent_badge.content.value = f"{urgent} URGENT"
+        self._pending_badge.content.value = f"{sum(1 for order in self._orders if (order.get('kitchen_status') or '').upper() in {'PENDING', 'COOKING'})} PENDING"
+        self._ready_badge.content.value = f"{ready} READY"
+        self._safe_update(self.ticket_grid)
+        self._safe_update(self.urgent_stat)
+        self._safe_update(self.cooking_stat)
+        self._safe_update(self.ready_stat)
+        self._safe_update(self._urgent_badge)
+        self._safe_update(self._pending_badge)
+        self._safe_update(self._ready_badge)
+
+    def _build_ticket_card(self, order: dict) -> ft.Container:
+        elapsed_seconds, elapsed_min, elapsed_remainder = self._elapsed_parts(order)
+        urgency = "late" if elapsed_min > 15 else ("warn" if elapsed_min > 5 else "ok")
+        timer_str = f"{int(elapsed_min):02d}:{elapsed_remainder:02d}"
+
+        border_colors = {
+            "ok": "#2D3748",
+            "warn": "#EAB30880",
+            "late": "#EF444480",
+        }
+        header_backgrounds = {
+            "ok": None,
+            "warn": "#EAB30810",
+            "late": "#EF444415",
+        }
+        timer_styles = {
+            "ok": ("#16A34A20", "#22C55E"),
+            "warn": ("#CA8A0420", "#EAB308"),
+            "late": ("#DC262620", "#EF4444"),
+        }
+        timer_bg, timer_color = timer_styles[urgency]
+        items = order.get("line_items", [])
+        k_status = (order.get("kitchen_status") or "PENDING").upper()
+        if k_status == "PENDING":
+            left_btn = self._kds_btn(
+                "▶ Start Cooking",
+                "#EAB308",
+                "#0A0A0A",
+                lambda e, oid=order["id"]: self._mark_cooking(oid),
+            )
+            right_btn = self._kds_btn(
+                "Bump",
+                "#2D3748",
+                "#9CA3AF",
+                lambda e, oid=order["id"]: self._bump_order(oid),
+            )
+        elif k_status == "COOKING":
+            left_btn = self._kds_btn(
+                "✓ Mark Ready",
+                "#22C55E",
+                "#0A0A0A",
+                lambda e, oid=order["id"]: self._mark_ready(oid),
+            )
+            right_btn = self._kds_btn(
+                "Bump",
+                "#2D3748",
+                "#9CA3AF",
+                lambda e, oid=order["id"]: self._bump_order(oid),
+            )
+        elif k_status == "READY":
+            left_btn = self._kds_btn(
+                "✓ Served — Close",
+                "#3B82F6",
+                "#FFFFFF",
+                lambda e, oid=order["id"]: self._mark_served(oid),
+            )
+            right_btn = self._kds_btn(
+                "Re-open",
+                "#2D3748",
+                "#9CA3AF",
+                lambda e, oid=order["id"]: self._mark_cooking(oid),
             )
         else:
-            for order in orders:
-                status = order.get("status", "unknown")
-                # Color coding by status
-                if status == "finalized":
-                    status_color = HMSColors.SUCCESS
-                    status_icon = ft.icons.CHECK_CIRCLE
-                elif status == "voided":
-                    status_color = HMSColors.ERROR
-                    status_icon = ft.icons.CANCEL
-                elif status == "held":
-                    status_color = HMSColors.WARNING
-                    status_icon = ft.icons.PAUSE_CIRCLE
-                else:
-                    status_color = HMSColors.PRIMARY
-                    status_icon = ft.icons.EDIT
+            left_btn = self._kds_btn(
+                "✓ Mark Ready",
+                "#22C55E",
+                "#0A0A0A",
+                lambda e, oid=order["id"]: self._mark_ready(oid),
+            )
+            right_btn = self._kds_btn(
+                "Bump",
+                "#2D3748",
+                "#9CA3AF",
+                lambda e, oid=order["id"]: self._bump_order(oid),
+            )
 
-                line_items = order.get("line_items", [])
-                items_str = ", ".join(
-                    f"{li.get('item_name', '?')} x{li.get('quantity', 1)}"
-                    for li in line_items[:3]
-                )
-                if len(line_items) > 3:
-                    items_str += f" +{len(line_items) - 3} more"
-                if not items_str:
-                    items_str = "No items"
-
-                finalized_at = order.get("finalized_at", "")
-                receipt = order.get("receipt_number", "")
-
-                card = ft.Container(
-                    content=ft.Row(
-                        [
-                            ft.Icon(status_icon, color=status_color, size=24),
-                            ft.Column(
-                                [
-                                    ft.Row([
-                                        ft.Text(f"Table {order.get('table_id', '—')}", size=15, weight="bold"),
-                                        ft.Container(
-                                            content=ft.Text(status.upper(), size=11, color=HMSColors.TEXT_LIGHT, weight="bold"),
-                                            bgcolor=status_color,
-                                            border_radius=4,
-                                            padding=ft.padding.symmetric(horizontal=8, vertical=2),
+        return ft.Container(
+            bgcolor="#1C2333",
+            border=ft.border.all(1, border_colors[urgency]),
+            border_radius=12,
+            content=ft.Column(
+                [
+                    ft.Container(
+                        bgcolor=header_backgrounds[urgency],
+                        padding=ft.padding.symmetric(horizontal=14, vertical=12),
+                        border=ft.border.only(bottom=ft.BorderSide(1, "#2D3748")),
+                        content=ft.Row(
+                            [
+                                ft.Column(
+                                    [
+                                        ft.Text(
+                                            f"Table {order.get('table_number') or order.get('table_id', '?')}",
+                                            font_family="Syne",
+                                            size=18,
+                                            weight=ft.FontWeight.W_800,
+                                            color="white",
                                         ),
-                                        ft.Text(f"#{receipt}" if receipt else "", size=12, color=HMSColors.TEXT_SECONDARY),
-                                    ], spacing=8),
-                                    ft.Text(items_str, size=12, color=HMSColors.TEXT_SECONDARY),
-                                ],
-                                spacing=4,
-                                expand=True,
-                            ),
-                            ft.Column(
-                                [
-                                    ft.Text(f"₹{order.get('total_amount', 0):.2f}", size=16, weight="bold"),
-                                    ft.Text(f"{len(line_items)} items", size=12, color=HMSColors.TEXT_SECONDARY),
-                                ],
-                                horizontal_alignment=ft.CrossAxisAlignment.END,
-                            ),
-                        ],
-                        spacing=12,
-                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                                        ft.Text(
+                                            f"ORD-{str(order.get('id', ''))[:8]} · {len(items)} items",
+                                            size=11,
+                                            color="#6B7280",
+                                            font_family="DM Mono",
+                                        ),
+                                    ],
+                                    spacing=2,
+                                    tight=True,
+                                ),
+                                ft.Container(expand=True),
+                                ft.Container(
+                                    bgcolor=timer_bg,
+                                    border_radius=6,
+                                    padding=ft.padding.symmetric(horizontal=8, vertical=3),
+                                    content=ft.Text(
+                                        timer_str,
+                                        font_family="DM Mono",
+                                        size=14,
+                                        weight=ft.FontWeight.W_500,
+                                        color=timer_color,
+                                    ),
+                                ),
+                            ]
+                        ),
                     ),
-                    padding=12,
-                    bgcolor=HMSColors.BG_SECONDARY,
-                    border_radius=8,
-                    border=ft.border.all(1, status_color),
-                )
-                self.orders_list.controls.append(card)
+                    ft.Container(
+                        expand=True,
+                        padding=ft.padding.all(12),
+                        content=ft.Column(
+                            controls=[self._build_kds_item(item) for item in order.get("line_items", [])] or [
+                                ft.Text("No items", size=13, color="#6B7280")
+                            ],
+                            spacing=8,
+                        ),
+                    ),
+                    ft.Container(
+                        padding=ft.padding.symmetric(horizontal=10, vertical=10),
+                        border=ft.border.only(top=ft.BorderSide(1, "#2D3748")),
+                        content=ft.Row(
+                            [
+                                left_btn,
+                                right_btn,
+                            ],
+                            spacing=8,
+                        ),
+                    ),
+                ],
+                spacing=0,
+                tight=True,
+            ),
+        )
 
+    def _render_orders(self):
+        stats = self._compute_stats()
+        self._urgent_badge.content.value = f"{stats['urgent_count']} URGENT"
+        self._pending_badge.content.value = f"{stats['pending_count']} PENDING"
+        self._ready_badge.content.value = f"{stats['ready_count']} READY"
+
+        self._grid.controls.clear()
+        if self._orders:
+            for order in self._orders:
+                self._grid.controls.append(self._build_ticket_card(order))
+        else:
+            self._grid.controls.append(
+                ft.Container(
+                    bgcolor="#111827",
+                    border=ft.border.all(1, "#1F2937"),
+                    border_radius=12,
+                    padding=24,
+                    content=ft.Text("No kitchen tickets right now.", size=16, color="#8B96B0"),
+                )
+            )
+
+        self._stats_row.controls = [
+            self._kstat_control(self.urgent_stat, "Urgent\n(11+ min)"),
+            self._vert_sep(),
+            self._kstat_control(self.cooking_stat, "In\nProgress"),
+            self._vert_sep(),
+            self._kstat_control(self.ready_stat, "Ready\nto Serve"),
+            self._vert_sep(),
+            self._kstat(
+                f"{stats['avg_prep_min']:.0f}:{stats['avg_prep_sec']:02d}",
+                "Avg Prep\nTime (min)",
+                "#8B96B0",
+            ),
+            self._vert_sep(),
+            self._kstat(str(stats["orders_today"]), "Orders\nToday", "#8B96B0"),
+            ft.Container(expand=True),
+            ft.TextButton(
+                "← Back to Dashboard",
+                on_click=lambda e: self._on_navigate("dashboard"),
+                style=ft.ButtonStyle(color="#8B96B0"),
+            ),
+        ]
+        self.urgent_stat.value = str(stats["urgent_count"])
+        self.cooking_stat.value = str(stats["in_progress_count"])
+        self.ready_stat.value = str(stats["ready_count"])
+
+        self._safe_update(self._grid)
+        self._safe_update(self._stats_row)
+        self._safe_update(self._urgent_badge)
+        self._safe_update(self._pending_badge)
+        self._safe_update(self._ready_badge)
+
+    def _mark_ready(self, order_id: str):
         try:
-            self.orders_list.update()
-            self.order_count_text.update()
+            with httpx.Client(base_url="http://127.0.0.1:8000") as client:
+                resp = client.patch(
+                    f"/api/sales/orders/{order_id}/kitchen-status",
+                    json={"kitchen_status": "READY"},
+                    timeout=5.0,
+                )
+            if resp.status_code == 200:
+                self._load_orders()
+                self._rebuild_grid()
+                self._page.update()
+            else:
+                self._show_snack(f"Failed: {resp.status_code}", error=True)
+        except Exception as ex:
+            self._show_snack(f"Error: {str(ex)[:60]}", error=True)
+
+    def _mark_cooking(self, order_id: str):
+        try:
+            with httpx.Client(base_url="http://127.0.0.1:8000") as client:
+                resp = client.patch(
+                    f"/api/sales/orders/{order_id}/kitchen-status",
+                    json={"kitchen_status": "COOKING"},
+                    timeout=5.0,
+                )
+                if resp.status_code == 200:
+                    self._load_orders()
+                    self._rebuild_grid()
+                    self._page.update()
+                else:
+                    self._show_snack(f"Failed: {resp.status_code}", error=True)
+        except Exception as ex:
+            self._show_snack(f"Error: {str(ex)[:60]}", error=True)
+
+    def _mark_served(self, order_id: str):
+        try:
+            with httpx.Client(base_url="http://127.0.0.1:8000") as client:
+                resp = client.patch(
+                    f"/api/sales/orders/{order_id}/kitchen-status",
+                    json={"kitchen_status": "SERVED"},
+                    timeout=5.0,
+                )
+                if resp.status_code == 200:
+                    self._orders = [order for order in self._orders if order["id"] != order_id]
+                    self._rebuild_grid()
+                    self._page.update()
+                else:
+                    self._show_snack(f"Failed: {resp.status_code}", error=True)
+        except Exception as ex:
+            self._show_snack(f"Error: {str(ex)[:60]}", error=True)
+
+    def _bump_order(self, order_id: str):
+        for index, order in enumerate(self._orders):
+            if str(order.get("id")) == str(order_id):
+                bumped = self._orders.pop(index)
+                self._orders.append(bumped)
+                self._rebuild_grid()
+                self._safe_update(self.ticket_grid)
+                return
+
+    def _refresh(self):
+        self._load_orders()
+        self._render_orders()
+        try:
+            self.page.update()
         except Exception:
             pass
+        self._schedule_refresh()
+
+    def _schedule_refresh(self):
+        if self._refresh_timer:
+            self._refresh_timer.cancel()
+        self._refresh_timer = threading.Timer(30, self._refresh)
+        self._refresh_timer.daemon = True
+        self._refresh_timer.start()
+
+    def _update_clock(self):
+        self._clock_text.value = datetime.now().strftime("%H:%M:%S")
+        self._safe_update(self._clock_text)
+        if self._clock_timer:
+            self._clock_timer.cancel()
+        self._clock_timer = threading.Timer(1.0, self._update_clock)
+        self._clock_timer.daemon = True
+        self._clock_timer.start()
+
+    def _on_navigate(self, route: str):
+        if route == "dashboard":
+            self.cleanup()
+            self.on_back()
+
+    def on_show(self):
+        self._refresh()
+        self._update_clock()
+
+    def cleanup(self):
+        if self._refresh_timer:
+            self._refresh_timer.cancel()
+            self._refresh_timer = None
+        if self._clock_timer:
+            self._clock_timer.cancel()
+            self._clock_timer = None

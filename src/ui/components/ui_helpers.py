@@ -418,7 +418,7 @@ def build_header(screen_title: str, current_user: Optional[dict]) -> ft.Containe
 
     clock_text = ft.Text(
         datetime.now().strftime("%H:%M"),
-        size=12,
+        size=13,
         color=HMSColors.TEXT_SECONDARY,
         font_family="DM Mono",
     )
@@ -439,26 +439,26 @@ def build_header(screen_title: str, current_user: Optional[dict]) -> ft.Containe
     timer.start()
 
     return ft.Container(
-        height=60,
+        height=70,
         bgcolor=HMSColors.SURFACE,
         border=ft.border.only(bottom=ft.BorderSide(1, HMSColors.BORDER)),
-        padding=ft.padding.symmetric(horizontal=16),
+        padding=ft.padding.symmetric(horizontal=24),
         content=ft.Row(
             [
-                ft.Text("HMS", size=20, weight=ft.FontWeight.W_800, color=HMSColors.ACCENT, font_family="Syne"),
-                ft.Text("· Hotel Management", size=12, color=HMSColors.TEXT_SECONDARY),
-                ft.Container(width=1, height=20, bgcolor=HMSColors.BORDER),
-                ft.Text(screen_title, size=15, weight=ft.FontWeight.W_600, color=HMSColors.TEXT_PRIMARY, font_family="Syne"),
+                ft.Text("HMS", size=22, weight=ft.FontWeight.W_800, color=HMSColors.ACCENT, font_family="Syne"),
+                ft.Text("· Hotel Management", size=13, color=HMSColors.TEXT_SECONDARY),
+                ft.Container(width=1, height=22, bgcolor=HMSColors.BORDER),
+                ft.Text(screen_title, size=17, weight=ft.FontWeight.W_600, color=HMSColors.TEXT_PRIMARY, font_family="Syne"),
                 ft.Container(expand=True),
                 ft.Container(
-                    padding=ft.padding.symmetric(horizontal=10, vertical=6),
+                    padding=ft.padding.symmetric(horizontal=12, vertical=7),
                     bgcolor=HMSColors.GREEN_DIM,
                     border=ft.border.all(1, HMSColors.GREEN + "60"),
                     border_radius=8,
                     content=ft.Row(
                         [
                             ft.Container(width=8, height=8, bgcolor=HMSColors.GREEN, border_radius=6),
-                            ft.Text("OFFLINE READY", size=11, color=HMSColors.GREEN, font_family="DM Mono"),
+                            ft.Text("OFFLINE READY", size=12, color=HMSColors.GREEN, font_family="DM Mono"),
                         ],
                         spacing=6,
                         tight=True,
@@ -469,18 +469,18 @@ def build_header(screen_title: str, current_user: Optional[dict]) -> ft.Containe
                     bgcolor=HMSColors.SURFACE2,
                     border_radius=40,
                     border=ft.border.all(1, HMSColors.BORDER),
-                    padding=ft.padding.symmetric(horizontal=8, vertical=6),
+                    padding=ft.padding.symmetric(horizontal=10, vertical=7),
                     content=ft.Row(
                         [
                             ft.Container(
-                                width=26,
-                                height=26,
+                                width=28,
+                                height=28,
                                 border_radius=20,
                                 gradient=ft.LinearGradient(colors=[HMSColors.ACCENT, HMSColors.ACCENT2]),
                                 alignment=ft.alignment.center,
                                 content=ft.Text(initial, size=12, color=HMSColors.TEXT_LIGHT, weight=ft.FontWeight.W_700),
                             ),
-                            ft.Text(username, size=12, color=HMSColors.TEXT_PRIMARY),
+                            ft.Text(username, size=13, color=HMSColors.TEXT_PRIMARY),
                             status_tag(role, HMSColors.ACCENT),
                         ],
                         spacing=8,

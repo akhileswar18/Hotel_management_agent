@@ -437,6 +437,257 @@ print(hasattr(ft, "Icons"), hasattr(ft, "icons"))
 
 ---
 
+### 16. HMS UI regressions in sidenav, dashboard activity formatting, and KDS layout
+
+**Error**:
+```text
+Sidebar AI entry missing, dashboard showed raw audit strings/UUID-heavy order titles, and Kitchen rendered as a plain history list instead of a KDS board.
+```
+
+**Root Cause**: The shell nav config and dashboard render paths were still using older placeholder layouts, and `order_history_screen.py` had not been rebuilt to the ticket-board design with safe refresh lifecycle handling.
+
+**Solution**:
+- Added the dedicated AI nav item with centered icon/label layout and special gradient styling.
+- Reformatted dashboard stat values, activity feed entries, active-order titles, pending status colors, and quick-action icon boxes.
+- Replaced the order history list with a dark KDS card grid, local bump ordering, ready action, auto-refresh timer, live clock, and cleanup hooks.
+
+**Files Modified**:
+- src/ui/app.py
+- src/ui/screens/dashboard_screen.py
+- src/ui/screens/order_history_screen.py
+
+**Prevention**: When applying visual refactors in Flet, verify helper output assumptions, keep screen-specific formatting logic local, and add explicit `cleanup()`/`on_show()` hooks for timer-driven views.
+
+---
+
+### 17. Manager display name did not match requested operator name
+
+**Error**:
+```text
+Dashboard greeted the manager as "Rajesh Kumar" instead of the requested "akhil".
+```
+
+**Root Cause**: `DashboardScreen.NAME_MAP` still mapped the `manager` role to the old placeholder display name.
+
+**Solution**:
+- Updated the `manager` entry in `DashboardScreen.NAME_MAP` to `akhil`.
+
+**Files Modified**:
+- src/ui/screens/dashboard_screen.py
+
+**Prevention**: Keep role-to-display-name defaults aligned with the current operator/demo data before validating UI copy.
+
+---
+
+### 18. HMS sidenav spacing and icon-state polish drifted from target shell
+
+**Error**:
+```text
+Sidenav items were not grouped/pinned correctly, hover state was missing, active accent treatment was inconsistent, and icon resolution needed runtime-safe fallback handling.
+```
+
+**Root Cause**: The shell was using a simpler nav builder with fixed item styling and direct icon references, which did not match the target layout or account for environments where `ft.Icons` is unavailable.
+
+**Solution**:
+- Rebuilt the sidenav item generation in `src/ui/app.py` with exact top/bottom grouping, active accent line, hover styling, low-stock badge placement, invoice route aliasing, and safe icon lookup that falls back to `ft.icons` / `CIRCLE_OUTLINED`.
+
+**Files Modified**:
+- src/ui/app.py
+
+**Prevention**: For Flet shell navigation, resolve icon constants against the installed runtime first and rebuild the nav from current route state instead of mutating partial styling in place.
+
+---
+
+### 19. Sidenav width needed to increase after layout polish
+
+**Error**:
+```text
+The left sidenav remained at 72px when the requested shell width was 90px.
+```
+
+**Root Cause**: The shell container width in `src/ui/app.py` was still hardcoded to the earlier compact width.
+
+**Solution**:
+- Updated the sidebar container width from `72` to `90`.
+
+**Files Modified**:
+- src/ui/app.py
+
+**Prevention**: Keep shell dimensions centralized and re-check fixed container widths after layout change requests.
+
+---
+
+### 20. Sidenav labels disappeared after icon size increase
+
+**Error**:
+```text
+Nav labels were no longer visible under the icons after enlarging the sidenav icon size and spacing.
+```
+
+**Root Cause**: The nav item still used a compact inner container while the icon size had been increased, so the icon consumed the available height and clipped the text.
+
+**Solution**:
+- Increased the sidenav nav-item box dimensions so both the enlarged icon and the label render inside the item.
+
+**Files Modified**:
+- src/ui/app.py
+
+**Prevention**: When increasing icon size in stacked nav items, resize the containing box at the same time and verify text is not clipped.
+
+---
+
+### 21. Top header scale no longer matched widened sidenav
+
+**Error**:
+```text
+The upper header bar and its text felt undersized after increasing the sidenav width.
+```
+
+**Root Cause**: `build_header()` in `src/ui/components/ui_helpers.py` was still using the earlier compact header height, padding, and text sizes.
+
+**Solution**:
+- Increased the shared header height, horizontal padding, and key text/chip sizes so the top bar better matches the widened shell.
+
+**Files Modified**:
+- src/ui/components/ui_helpers.py
+
+**Prevention**: When changing major shell dimensions such as sidebar width, review the shared header scale in the same pass so the layout stays visually balanced.
+
+---
+
+### 22. Shared header height needed a final shell alignment increase
+
+**Error**:
+```text
+The top header bar still needed to be taller after the shell layout adjustments.
+```
+
+**Root Cause**: `build_header()` was updated once already, but the final requested height target was higher than the current value.
+
+**Solution**:
+- Increased the shared header container height to `70`.
+
+**Files Modified**:
+- src/ui/components/ui_helpers.py
+
+**Prevention**: After iterative shell tweaks, re-check final numeric size targets against the latest request instead of assuming the previous adjustment is enough.
+
+---
+
+### 23. Reports screen rendered a blank grey body due to brittle layout/data assumptions
+
+**Error**:
+```text
+Reports screen showed a blank grey area instead of cards and charts.
+```
+
+**Root Cause**: The previous reports UI relied on an older layout structure and field names that did not line up cleanly with current report payloads, so empty/missing data paths left the screen visually broken.
+
+**Solution**:
+- Rebuilt `src/ui/screens/reports_screen.py` with a dark resilient layout, data normalization helpers for current API payloads, explicit empty states, and a full `_render_reports()` rebuild path.
+
+**Files Modified**:
+- src/ui/screens/reports_screen.py
+
+**Prevention**: For dashboard-style Flet screens, normalize API payload variants at the screen boundary and always render explicit empty-state controls instead of assuming chart/list data exists.
+
+---
+
+### 24. KDS loaded the wrong order set and did not visually refresh after kitchen status updates
+
+**Error**:
+```text
+Kitchen Display missed finalized tickets, used the wrong line item fields, and looked frozen after Start Cooking / Mark Ready / Served actions.
+```
+
+**Root Cause**: The KDS screen was querying `status=draft` instead of finalized kitchen tickets, and its status action handlers rebuilt state incompletely after PATCH calls.
+
+**Solution**:
+- Updated `order_history_screen.py` to load `status=finalized`, use `line_items.item_name` and `line_items.quantity`, switch footer buttons by `kitchen_status`, and fully rebuild/update the ticket grid after COOKING / READY / SERVED transitions.
+
+**Files Modified**:
+- src/ui/screens/order_history_screen.py
+
+**Prevention**: For workflow boards driven by status metadata, align the query filter with the actual lifecycle stage and always rebind the rendered collection after successful PATCH transitions.
+
+---
+
+### 25. Inventory category dropdown broke after first selection due to stale hardcoded options
+
+**Error**:
+```text
+Inventory category filter worked once, then dropdown state became inconsistent on later selections.
+```
+
+**Root Cause**: The category dropdown was initialized with a fixed option list that did not match real API category values, and its options were never rebuilt from fresh item data after load.
+
+**Solution**:
+- Updated `products_screen.py` to populate category options dynamically from `self.items`, keep `self.items` as the full inventory set, and apply category filtering client-side only for the displayed list.
+
+**Files Modified**:
+- src/ui/screens/products_screen.py
+
+**Prevention**: For Flet dropdowns backed by API data, rebuild the full option set from the loaded dataset and validate the current selection before updating the control.
+
+---
+
+### 26. Inventory snapshot tiles were too large for the sidebar layout
+
+**Error**:
+```text
+The inventory sidebar snapshot used oversized 2x2 tiles that consumed too much vertical space.
+```
+
+**Root Cause**: The snapshot section rendered four boxed metric tiles instead of a compact summary layout suited to the narrow sidebar.
+
+**Solution**:
+- Replaced the snapshot grid in `products_screen.py` with a compact `_build_snapshot()` text-row summary wired through `self.snapshot_container`.
+
+**Files Modified**:
+- src/ui/screens/products_screen.py
+
+**Prevention**: In narrow sidebars, prefer stacked metric rows over card grids unless the available width and height were explicitly designed for tiled summaries.
+
+---
+
+### 27. Compact inventory snapshot still needed a smaller footprint
+
+**Error**:
+```text
+The snapshot summary was converted to rows, but its container still occupied more space than desired.
+```
+
+**Root Cause**: The row-based snapshot layout was compact structurally, but the container padding and row spacing still left excess vertical space.
+
+**Solution**:
+- Reduced the snapshot container padding and tightened the snapshot row spacing in `products_screen.py`.
+
+**Files Modified**:
+- src/ui/screens/products_screen.py
+
+**Prevention**: After replacing tile layouts with compact summaries, re-check container padding and inter-row spacing separately; the layout type change alone may not reduce footprint enough.
+
+---
+
+### 28. POS menu item cards were too tall for efficient browsing
+
+**Error**:
+```text
+POS menu cards consumed too much vertical space, reducing the number of visible items in the menu grid.
+```
+
+**Root Cause**: The menu grid cards had no fixed compact height and used looser typography/spacing than needed for the available grid area.
+
+**Solution**:
+- Updated `pos_screen.py` to use a compact fixed-height menu card, tighter column spacing, slightly reduced typography, and a denser grid aspect ratio.
+
+**Files Modified**:
+- src/ui/screens/pos_screen.py
+
+**Prevention**: For high-density POS grids, constrain card height explicitly and tune the grid aspect ratio together with text spacing so more items fit without clipping key metadata.
+
+---
+
 ## Testing Results Summary
 
 | Component | Status | Notes |

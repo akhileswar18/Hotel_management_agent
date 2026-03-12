@@ -5,7 +5,7 @@ Target-style operational dashboard with greeting, KPI cards, quick actions,
 active orders, recent activity, and payment breakdown.
 """
 
-from datetime import date
+from datetime import date, datetime
 from typing import Callable, Dict, List
 
 import flet as ft
@@ -27,7 +27,7 @@ class DashboardScreen(ft.Column):
     NAME_MAP = {
         "waiter": "Suresh",
         "cashier": "Rajesh",
-        "manager": "Rajesh Kumar",
+        "manager": "akhil",
         "clerk": "Clerk",
         "kitchen": "Kitchen",
         "admin": "Admin",
@@ -192,12 +192,12 @@ class DashboardScreen(ft.Column):
             content=ft.Column(
                 [
                     ft.Container(
-                        width=36,
-                        height=36,
-                        border_radius=8,
-                        bgcolor=color + "25",
+                        width=40,
+                        height=40,
+                        border_radius=10,
+                        bgcolor=color + "20",
                         alignment=ft.alignment.center,
-                        content=ft.Text(icon, size=16),
+                        content=ft.Text(icon, size=18, text_align=ft.TextAlign.CENTER),
                     ),
                     ft.Text(title, size=14, weight=ft.FontWeight.W_700, color=HMSColors.TEXT_PRIMARY),
                     ft.Text(subtitle, size=12, color=HMSColors.TEXT_SECONDARY),
@@ -248,95 +248,147 @@ class DashboardScreen(ft.Column):
         except Exception:
             pass
 
-    def _render(self):
-        self.stats_row.controls = [
-            ft.Container(expand=1, content=stat_card("$", str(self._summary["revenue"]), "Today's Revenue", HMSColors.GREEN)),
-            ft.Container(expand=1, content=stat_card("✓", str(self._summary["orders_today"]), "Orders Today", HMSColors.ACCENT)),
-            ft.Container(expand=1, content=stat_card("⬡", str(self._summary["low_stock"]), "Low Stock Alerts", HMSColors.YELLOW)),
-            ft.Container(expand=1, content=stat_card("▣", str(self._summary["avg_order"]), "Avg Order Value", HMSColors.BLUE)),
-        ]
+    def _accented_stat_card(self, icon: str, value: str, label: str, color: str) -> ft.Container:
+        card = stat_card(icon, value, label, color)
+        if isinstance(card.content, ft.Column) and len(card.content.controls) >= 3:
+            value_text = card.content.controls[2]
+            if isinstance(value_text, ft.Text):
+                value_text.color = color
+        return card
 
+    def _relative_time(self, created_at: str) -> str:
+        if not created_at:
+            return "--"
+        try:
+            normalized = created_at.replace("Z", "+00:00")
+            event_time = datetime.fromisoformat(normalized)
+            now = datetime.now(event_time.tzinfo) if event_time.tzinfo else datetime.now()
+            elapsed_seconds = max(int((now - event_time).total_seconds()), 0)
+            if elapsed_seconds < 3600:
+                return f"{max(1, elapsed_seconds // 60)}m ago"
+            return f"{elapsed_seconds // 3600}h ago"
+        except Exception:
+            return "--"
+
+    def _build_activity_feed(self):
+        self.activity_list.controls.clear()
+        if not self._activity:
+            self.activity_list.controls.append(ft.Text("No recent activity", color=HMSColors.TEXT_SECONDARY))
+            return
+
+        for evt in self._activity[:10]:
+            event_type = str(evt.get("event_type", "audit.event"))
+            upper_event = event_type.upper()
+            color = HMSColors.TEXT_MUTED
+            if event_type.startswith("order"):
+                color = HMSColors.GREEN
+            elif event_type.startswith("payment"):
+                color = HMSColors.BLUE
+            elif event_type.startswith("inventory"):
+                color = HMSColors.YELLOW
+            elif (
+                event_type.startswith("audit")
+                or upper_event.startswith("CREATE")
+                or upper_event.startswith("FINALIZE")
+            ):
+                color = HMSColors.ACCENT
+
+            description = str(evt.get("description") or "").strip()
+            if not description:
+                description = f"{event_type} event"
+            if len(description) > 60:
+                description = description[:57].rstrip() + "..."
+
+            label = event_type.replace(".", " ").replace("_", " ").title()
+            self.activity_list.controls.append(
+                activity_item(label, description, self._relative_time(str(evt.get("created_at", ""))), color)
+            )
+
+    def _build_active_orders(self):
         self.active_orders_list.controls.clear()
         if not self._active_orders:
             self.active_orders_list.controls.append(
                 ft.Text("No active orders right now.", color=HMSColors.TEXT_SECONDARY, size=13)
             )
-        else:
-            for order in self._active_orders:
-                kstatus = (order.get("kitchen_status") or "PENDING").upper()
-                status_color = HMSColors.YELLOW
-                if kstatus in ("READY", "SERVED"):
-                    status_color = HMSColors.GREEN
-                elif kstatus == "LATE":
-                    status_color = HMSColors.RED
-                row = ft.Container(
-                    padding=10,
-                    border_radius=10,
-                    bgcolor=HMSColors.SURFACE2,
-                    border=ft.border.all(1, HMSColors.BORDER),
-                    content=ft.Row(
-                        [
-                            ft.Container(
-                                width=38,
-                                height=38,
-                                border_radius=10,
-                                bgcolor=HMSColors.BG,
-                                alignment=ft.alignment.center,
-                                content=ft.Text(f"T{order.get('table_id', '?')}", color=HMSColors.ACCENT, weight=ft.FontWeight.W_700),
-                            ),
-                            ft.Column(
-                                [
-                                    ft.Text(
-                                        ", ".join(
-                                            [f"{i.get('item_name', '')} x{i.get('quantity', 1)}" for i in order.get("line_items", [])][:3]
-                                        ) or f"Order {str(order.get('id', ''))[:8]}",
-                                        size=13,
-                                        color=HMSColors.TEXT_PRIMARY,
-                                    ),
-                                    ft.Text(
-                                        f"{len(order.get('line_items', []))} items",
-                                        size=11,
-                                        color=HMSColors.TEXT_SECONDARY,
-                                    ),
-                                ],
-                                spacing=2,
-                                expand=True,
-                                tight=True,
-                            ),
-                            ft.Text(
-                                f"₹{float(order.get('total_amount', 0.0)):.0f}",
-                                size=14,
-                                color=HMSColors.ACCENT2,
-                                font_family="DM Mono",
+            return
+
+        for order in self._active_orders:
+            kitchen_status = (order.get("kitchen_status") or "PENDING").upper()
+            status_colors = {
+                "PENDING": HMSColors.TEXT_MUTED,
+                "COOKING": HMSColors.YELLOW,
+                "READY": HMSColors.GREEN,
+                "SERVED": HMSColors.BLUE,
+                "LATE": HMSColors.RED,
+            }
+            status_color = status_colors.get(kitchen_status, HMSColors.TEXT_MUTED)
+
+            items = order.get("items") or order.get("line_items") or []
+            order_title = ", ".join(
+                [
+                    f"{item.get('name') or item.get('item_name', 'Item')} x{item.get('qty') or item.get('quantity', 1)}"
+                    for item in items[:3]
+                ]
+            )
+            if not order_title:
+                order_title = f"Order {str(order.get('id', ''))[:8]}"
+
+            row = ft.Container(
+                padding=10,
+                border_radius=10,
+                bgcolor=HMSColors.SURFACE2,
+                border=ft.border.all(1, HMSColors.BORDER),
+                content=ft.Row(
+                    [
+                        ft.Container(
+                            width=38,
+                            height=38,
+                            border_radius=10,
+                            bgcolor=HMSColors.BG,
+                            alignment=ft.alignment.center,
+                            content=ft.Text(
+                                f"T{order.get('table_number') or order.get('table_id', '?')}",
+                                color=HMSColors.ACCENT,
                                 weight=ft.FontWeight.W_700,
                             ),
-                            status_tag(kstatus, status_color),
-                        ],
-                        spacing=10,
-                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                    ),
-                )
-                self.active_orders_list.controls.append(row)
+                        ),
+                        ft.Column(
+                            [
+                                ft.Text(order_title, size=13, color=HMSColors.TEXT_PRIMARY),
+                                ft.Text(
+                                    f"{len(items)} items",
+                                    size=11,
+                                    color=HMSColors.TEXT_SECONDARY,
+                                ),
+                            ],
+                            spacing=2,
+                            expand=True,
+                            tight=True,
+                        ),
+                        ft.Text(
+                            f"₹{float(order.get('total_amount', 0.0)):.0f}",
+                            size=14,
+                            color=HMSColors.ACCENT2,
+                            font_family="DM Mono",
+                            weight=ft.FontWeight.W_700,
+                        ),
+                        status_tag(kitchen_status, status_color),
+                    ],
+                    spacing=10,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                ),
+            )
+            self.active_orders_list.controls.append(row)
 
-        self.activity_list.controls.clear()
-        if not self._activity:
-            self.activity_list.controls.append(ft.Text("No recent activity", color=HMSColors.TEXT_SECONDARY))
-        else:
-            for evt in self._activity[:10]:
-                etype = str(evt.get("event_type", "audit.event"))
-                ts = str(evt.get("created_at", ""))[11:16] if evt.get("created_at") else "--:--"
-                color = HMSColors.ACCENT
-                if etype.startswith("order."):
-                    color = HMSColors.GREEN
-                elif etype.startswith("payment."):
-                    color = HMSColors.BLUE
-                elif etype.startswith("inventory."):
-                    color = HMSColors.YELLOW
-                elif etype.startswith("error."):
-                    color = HMSColors.RED
-                self.activity_list.controls.append(
-                    activity_item(etype, str(evt.get("description", "Activity")), ts, color)
-                )
+    def _render(self):
+        self.stats_row.controls = [
+            ft.Container(expand=1, content=self._accented_stat_card("$", str(self._summary["revenue"]), "Today's Revenue", HMSColors.GREEN)),
+            ft.Container(expand=1, content=self._accented_stat_card("✓", str(self._summary["orders_today"]), "Orders Today", HMSColors.ACCENT)),
+            ft.Container(expand=1, content=self._accented_stat_card("⬡", str(self._summary["low_stock"]), "Low Stock Alerts", HMSColors.YELLOW)),
+            ft.Container(expand=1, content=self._accented_stat_card("▣", str(self._summary["avg_order"]), "Avg Order Value", HMSColors.BLUE)),
+        ]
+        self._build_active_orders()
+        self._build_activity_feed()
 
         total = max(
             self._payment_breakdown["cash"] + self._payment_breakdown["card"] + self._payment_breakdown["voucher"],

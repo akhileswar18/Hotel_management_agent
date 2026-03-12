@@ -36,6 +36,7 @@ class HMSApp:
         self.screens = {}
         self.current_route = "login"
         self.nav_items = {}
+        self.has_low_stock = False
         self.low_stock_badge = ft.Container(
             width=8,
             height=8,
@@ -65,29 +66,31 @@ class HMSApp:
             "billing": ReceiptScreen(self.page, user_info=self.current_user, on_back=lambda: self._show_route("pos")),
             "reports": ReportsScreen(self.page, self.current_user, on_back=lambda: self._show_route("pos")),
             "kitchen": OrderHistoryScreen(self.page, self.current_user, on_back=lambda: self._show_route("dashboard")),
-            "ai": ChatScreen(
+            "agent": ChatScreen(
                 self.page,
                 user_role=str(self.current_user.get("role", "WAITER")),
                 user_id=str(self.current_user.get("user_id", "")),
             ),
         }
+        self.screens["ai"] = self.screens["agent"]
+        self.screens["invoice"] = self.screens["billing"]
 
         self.content_area = ft.Container(expand=True, content=self.screens["dashboard"])
 
         nav_column = ft.Column(
             controls=[],
-            spacing=8,
+            spacing=0,
             expand=True,
-            alignment=ft.MainAxisAlignment.START,
+            horizontal_alignment=ft.CrossAxisAlignment.CENTER,
         )
         self.nav_column = nav_column
         self._build_sidebar_items()
 
         self.sidebar = ft.Container(
-            width=72,
-            bgcolor="#0A0D14",
-            border=ft.border.only(right=ft.BorderSide(1, HMSColors.BORDER)),
-            padding=ft.padding.symmetric(vertical=16, horizontal=12),
+            width=90,
+            bgcolor="#161B27",
+            border=ft.border.only(right=ft.BorderSide(1, "#2A3349")),
+            padding=ft.padding.symmetric(vertical=12),
             content=nav_column,
         )
 
@@ -105,53 +108,158 @@ class HMSApp:
 
     def _build_sidebar_items(self):
         items = [
-            ("dashboard", ft.icons.DASHBOARD, "Dash"),
-            ("pos", ft.icons.CHECK_CIRCLE, "POS"),
-            ("inventory", ft.icons.INVENTORY_2, "Inv"),
-            ("billing", ft.icons.RECEIPT_LONG, "Bill"),
-            ("reports", ft.icons.INSIGHTS, "Rpt"),
-            ("spacer", None, ""),
-            ("kitchen", ft.icons.KITCHEN, "KDS"),
-            ("ai", ft.icons.AUTO_AWESOME, "AI"),
-            ("logout", ft.icons.LOGOUT, "Out"),
+            self._make_nav_item(self._resolve_nav_icon("DASHBOARD_OUTLINED"), "Dash", "dashboard"),
+            self._make_nav_item(self._resolve_nav_icon("POINT_OF_SALE"), "POS", "pos"),
+            self._make_nav_item(self._resolve_nav_icon("INVENTORY_2_OUTLINED"), "Inv", "inventory", dot=self.has_low_stock),
+            self._make_nav_item(self._resolve_nav_icon("RECEIPT_LONG_OUTLINED"), "Bill", "invoice"),
+            self._make_nav_item(self._resolve_nav_icon("BAR_CHART_OUTLINED"), "Rpt", "reports"),
+            ft.Container(expand=True),
+            ft.Container(
+                width=36,
+                height=1,
+                bgcolor="#2A3349",
+                margin=ft.margin.symmetric(vertical=4),
+            ),
+            self._make_nav_item(self._resolve_nav_icon("RESTAURANT_MENU"), "KDS", "kitchen"),
+            self._make_nav_item(self._resolve_nav_icon("PSYCHOLOGY_OUTLINED"), "AI", "agent", special=True),
+            self._make_nav_item(self._resolve_nav_icon("LOGOUT"), "Out", "logout"),
         ]
 
         self.nav_column.controls.clear()
         self.nav_items.clear()
-        for key, icon, label in items:
-            if key == "spacer":
-                self.nav_column.controls.append(ft.Container(expand=True))
-                continue
-            nav = self._make_nav_item(key, icon, label)
-            self.nav_items[key] = nav
-            self.nav_column.controls.append(nav)
+        self.nav_column.controls.extend(items)
+        if self.nav_column.page:
+            self.nav_column.update()
 
-    def _make_nav_item(self, key: str, icon_name: str, label: str) -> ft.Container:
-        icon = ft.Icon(icon_name, size=18, color=HMSColors.TEXT_MUTED)
-        label_text = ft.Text(label, size=9, color=HMSColors.TEXT_MUTED)
+    def _resolve_nav_icon(self, icon_name: str):
+        icon_set = getattr(ft, "Icons", None)
+        if icon_set is not None and hasattr(icon_set, icon_name):
+            return getattr(icon_set, icon_name)
+        lower_icon_set = getattr(ft, "icons", None)
+        if lower_icon_set is not None and hasattr(lower_icon_set, icon_name):
+            return getattr(lower_icon_set, icon_name)
+        if icon_set is not None and hasattr(icon_set, "CIRCLE_OUTLINED"):
+            return getattr(icon_set, "CIRCLE_OUTLINED")
+        return getattr(ft.icons, "CIRCLE_OUTLINED")
 
-        def _click(_):
-            if key == "logout":
-                self._handle_logout()
-                return
-            self._show_route(key)
+    def _navigate(self, screen_key: str):
+        if screen_key == "logout":
+            self._handle_logout()
+            return
+        if screen_key == "agent":
+            self._show_chat_screen()
+            return
+        self._show_route(screen_key)
 
-        content = ft.Column(
-            [icon, label_text],
-            spacing=2,
-            horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+    def _make_nav_item(self, icon_name, label: str, screen_key: str, dot: bool = False, special: bool = False) -> ft.Control:
+        active_screen = "invoice" if self.current_route == "billing" else self.current_route
+        is_active = screen_key == active_screen
+
+        if is_active:
+            icon_color = "#FF6B35"
+            bg_color = "#FF6B3520"
+            border_col = "#FF6B3540"
+        elif special:
+            icon_color = "#FF6B35"
+            bg_color = "#FF6B3508"
+            border_col = "#FF6B3530"
+        else:
+            icon_color = "#4B5675"
+            bg_color = "transparent"
+            border_col = "transparent"
+
+        icon_widget = ft.Icon(
+            name=icon_name,
+            size=40,
+            color=icon_color,
+        )
+
+        label_widget = ft.Text(
+            label,
+            size=9,
+            weight=ft.FontWeight.W_600,
+            color=icon_color,
+            text_align=ft.TextAlign.CENTER,
+        )
+
+        inner_column = ft.Column(
+            controls=[icon_widget, label_widget],
             alignment=ft.MainAxisAlignment.CENTER,
+            horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+            spacing=4,
+            tight=True,
+        )
+        inner_container = ft.Container(
+            width=56,
+            height=72,
+            border_radius=10,
+            bgcolor=bg_color,
+            border=ft.border.all(1, border_col),
+            alignment=ft.alignment.center,
+            content=inner_column,
+        )
+        if special:
+            inner_container.gradient = ft.LinearGradient(
+                colors=["#FF6B3510", "#FF6B3504"],
+                begin=ft.alignment.top_left,
+                end=ft.alignment.bottom_right,
+            )
+
+        inner = inner_container
+        if dot:
+            inner = ft.Stack(
+                [
+                    inner_container,
+                    ft.Container(
+                        width=8,
+                        height=8,
+                        border_radius=4,
+                        bgcolor="#EF4444",
+                        border=ft.border.all(2, "#161B27"),
+                        right=4,
+                        top=4,
+                    ),
+                ],
+                width=56,
+                height=72,
+            )
+
+        def _on_hover(e: ft.HoverEvent):
+            if is_active:
+                return
+            hovering = str(getattr(e, "data", "")).lower() == "true"
+            inner_container.bgcolor = "#1E2535" if hovering else bg_color
+            inner_container.border = ft.border.all(1, "#2A3349" if hovering else border_col)
+            try:
+                self.page.update()
+            except Exception:
+                pass
+
+        nav_item_container = ft.Container(
+            content=inner,
+            padding=ft.padding.symmetric(vertical=4),
+            on_click=lambda e, s=screen_key: self._navigate(s),
+            on_hover=_on_hover,
         )
 
-        item = ft.Container(
-            width=48,
-            height=48,
-            border_radius=10,
-            alignment=ft.alignment.center,
-            on_click=_click,
-            content=ft.Stack([content, ft.Container(content=self.low_stock_badge, alignment=ft.alignment.top_right)] if key == "inventory" else [content]),
-        )
-        item.data = {"key": key, "icon": icon, "label": label_text}
+        item = nav_item_container
+        if is_active:
+            item = ft.Stack(
+                [
+                    nav_item_container,
+                    ft.Container(
+                        width=2,
+                        height=72,
+                        bgcolor="#FF6B35",
+                        left=0,
+                        top=4,
+                    ),
+                ],
+                width=56,
+                height=80,
+            )
+
+        self.nav_items[screen_key] = item
         return item
 
     def _refresh_low_stock_badge(self):
@@ -164,51 +272,35 @@ class HMSApp:
                     count = len([r for r in rows if int(r.get("stock_on_hand", 0)) < int(r.get("reorder_level", 0))])
         except Exception:
             count = 0
-        self.low_stock_badge.visible = count > 0
-        if self.low_stock_badge.page:
-            self.low_stock_badge.update()
+        self.has_low_stock = count > 0
+        self.low_stock_badge.visible = self.has_low_stock
+        if hasattr(self, "nav_column"):
+            self._build_sidebar_items()
 
     def _show_route(self, route: str):
+        if route == "ai":
+            route = "agent"
+        if route == "invoice":
+            route = "billing"
         if route not in self.screens:
             return
+        previous_route = self.current_route
+        if previous_route in self.screens and previous_route != route:
+            previous_screen = self.screens.get(previous_route)
+            cleanup = getattr(previous_screen, "cleanup", None)
+            if callable(cleanup):
+                cleanup()
         self.current_route = route
         self.content_area.content = self.screens[route]
-        self._style_nav_items()
+        on_show = getattr(self.screens[route], "on_show", None)
+        if callable(on_show):
+            on_show()
+        self._build_sidebar_items()
         self.content_area.update()
         self._refresh_low_stock_badge()
 
-    def _style_nav_items(self):
-        for key, item in self.nav_items.items():
-            data = item.data or {}
-            icon = data.get("icon")
-            label = data.get("label")
-            active = key == self.current_route
-            if key == "ai":
-                if active:
-                    item.gradient = ft.LinearGradient(colors=[HMSColors.ACCENT + "30", HMSColors.BLUE + "30"])
-                    item.bgcolor = None
-                    item.border = ft.border.all(1, HMSColors.ACCENT + "70")
-                    icon.color = HMSColors.ACCENT
-                    label.color = HMSColors.TEXT_PRIMARY
-                else:
-                    item.gradient = ft.LinearGradient(colors=[HMSColors.ACCENT + "10", HMSColors.BLUE + "10"])
-                    item.bgcolor = None
-                    item.border = ft.border.all(1, HMSColors.BORDER)
-                    icon.color = HMSColors.TEXT_SECONDARY
-                    label.color = HMSColors.TEXT_MUTED
-            else:
-                item.gradient = None
-                if active:
-                    item.bgcolor = HMSColors.ACCENT + "26"
-                    item.border = ft.border.all(1, HMSColors.ACCENT + "60")
-                    icon.color = HMSColors.ACCENT
-                    label.color = HMSColors.TEXT_PRIMARY
-                else:
-                    item.bgcolor = None
-                    item.border = ft.border.all(1, "00000000")
-                    icon.color = HMSColors.TEXT_MUTED
-                    label.color = HMSColors.TEXT_MUTED
-            item.update()
+    def _show_chat_screen(self):
+        self._show_route("agent")
 
     def _handle_logout(self):
         self.current_user = None
