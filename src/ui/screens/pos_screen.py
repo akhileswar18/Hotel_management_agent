@@ -28,6 +28,20 @@ from src.ui.components.ui_helpers import (
 POS_EMERALD = "#10b981"
 POS_BG = HMSColors.BG_PRIMARY
 POS_CARD_BG = HMSColors.BG_SECONDARY
+IMAGE_MAP = {
+    "Paneer Tikka": "/images/paneer_tikka.jpg",
+    "Samosa": "/images/samosa.jpg",
+    "Coke": "/images/coke.jpg",
+    "Lassi": "/images/lassi.jpg",
+    "Mango Juice": "/images/mango_juice.jpg",
+    "Naan": "/images/butter_naan.jpg",
+    "Butter Chicken": "/images/butter_chicken.jpg",
+    "Biryani": "/images/biriyani.jpg",
+    "Dosa": "/images/dosa.jpg",
+    "Masala Dosa": "/images/masala_dosa.jpg",
+    "Idli": "/images/idli.jpg",
+    "Ghee Dosa": "/images/ghee_dosa.jpg",
+}
 
 
 class POSScreen(ft.Column):
@@ -347,57 +361,100 @@ class POSScreen(ft.Column):
         reorder = int(item.get("reorder_level", 0))
         is_out = stock <= 0
         if is_out:
-            stock_text = "✗ Out"
-            stock_color = HMSColors.RED
-        elif stock < reorder:
+            stock_text = "✕ Out of Stock"
+            stock_color = "#EF4444"
+        elif stock <= reorder:
             stock_text = f"⚠ Low ({stock})"
-            stock_color = HMSColors.YELLOW
+            stock_color = "#EAB308"
         else:
             stock_text = f"✓ In Stock ({stock})"
-            stock_color = HMSColors.GREEN
+            stock_color = "#22C55E"
+
+        image_src = IMAGE_MAP.get(str(item.get("name", "")), "/images/placeholder.jpg")
 
         def _add(_):
-            self._handle_add_item(str(item.get("id")), str(item.get("name")), 1)
+            if int(item.get("stock_on_hand", 0)) > 0:
+                self._handle_add_item(str(item.get("id")), str(item.get("name")), 1)
 
         return ft.Container(
             height=130,
-            bgcolor=HMSColors.SURFACE2,
-            border=ft.border.all(1, HMSColors.BORDER if not is_out else HMSColors.RED + "88"),
+            border=ft.border.all(1, "#2A334960" if not is_out else "#EF444440"),
             border_radius=10,
-            padding=12,
+            clip_behavior=ft.ClipBehavior.ANTI_ALIAS,
             opacity=0.45 if is_out else 1.0,
             on_click=None if is_out else _add,
-            content=ft.Column(
+            content=ft.Stack(
                 [
-                    ft.Text(
-                        str(item.get("name", "Item")),
-                        size=13,
-                        weight=ft.FontWeight.W_600,
-                        color=HMSColors.TEXT_PRIMARY,
-                        max_lines=2,
-                        overflow=ft.TextOverflow.ELLIPSIS,
-                    ),
-                    ft.Text(str(item.get("category", "")).title(), size=11, color=HMSColors.TEXT_SECONDARY),
-                    ft.Container(expand=True),
-                    ft.Row(
-                        [
-                            ft.Text(
-                                f"Rs.{float(item.get('unit_price', 0.0)):.2f}",
-                                size=14,
-                                weight=ft.FontWeight.W_600,
-                                color=HMSColors.ACCENT2,
-                                font_family="DM Mono",
+                    ft.Image(
+                        src=image_src,
+                        fit=ft.ImageFit.COVER,
+                        width=float("inf"),
+                        height=130,
+                        error_content=ft.Container(
+                            bgcolor=HMSColors.SURFACE2,
+                            width=float("inf"),
+                            height=130,
+                            content=ft.Text(
+                                "🍽",
+                                size=32,
+                                text_align=ft.TextAlign.CENTER,
                             ),
-                            ft.Container(expand=True),
-                            ft.Text(stock_text, size=11, color=stock_color),
-                        ],
-                        alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
-                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                            alignment=ft.alignment.center,
+                        ),
                     ),
-                ],
-                spacing=4,
-                tight=True,
-                expand=True,
+                    ft.Container(
+                        width=float("inf"),
+                        height=130,
+                        gradient=ft.LinearGradient(
+                            begin=ft.alignment.top_center,
+                            end=ft.alignment.bottom_center,
+                            colors=["#00000000", "#BB000000"],
+                        ),
+                    ),
+                    ft.Container(
+                        padding=ft.padding.all(10),
+                        width=float("inf"),
+                        height=130,
+                        content=ft.Column(
+                            [
+                                ft.Text(
+                                    str(item.get("name", "Item")),
+                                    size=13,
+                                    weight=ft.FontWeight.W_700,
+                                    color="#FFFFFF",
+                                    max_lines=2,
+                                    overflow=ft.TextOverflow.ELLIPSIS,
+                                ),
+                                ft.Text(
+                                    str(item.get("category", "")).title(),
+                                    size=10,
+                                    color="#AAFFFFFF",
+                                ),
+                                ft.Container(expand=True),
+                                ft.Row(
+                                    [
+                                        ft.Text(
+                                            f"₹{float(item.get('unit_price', 0.0)):.0f}",
+                                            size=15,
+                                            weight=ft.FontWeight.W_800,
+                                            color=HMSColors.ACCENT2,
+                                            font_family="DM Mono",
+                                        ),
+                                        ft.Text(
+                                            stock_text,
+                                            size=10,
+                                            color=stock_color,
+                                        ),
+                                    ],
+                                    alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                                    vertical_alignment=ft.CrossAxisAlignment.END,
+                                ),
+                            ],
+                            spacing=2,
+                            tight=True,
+                        ),
+                    ),
+                ]
             ),
         )
 

@@ -755,3 +755,35 @@ All code is marked with `# TODO:` comments for Phase 2 work.
 ---
 
 **Status**: ✅ All Phase 1.5 critical errors resolved (12 total) | App running: API on :8000, UI on :8080
+
+---
+
+## Troubleshooting Notes
+
+29. **POS Card Images Not Rendering**:
+   - Error: POS menu cards needed image backgrounds but the app was not serving item photos.
+   - Root cause: Menu cards were plain `ft.Container` blocks, and `ft.app()` was not exposing the actual asset directory used by the repo.
+   - Fix: Switched POS cards to `ft.Stack` image cards with gradient overlay, mapped real filenames from `src/assets/images`, and set `assets_dir="src/assets"` in the Flet entry point.
+   - Files touched: `src/ui/screens/pos_screen.py`, `src/ui/app.py`.
+   - Prevention: Verify the real asset folder path before wiring `ft.Image` sources, and always align `assets_dir` with the directory that actually exists on disk.
+
+30. **Relative Flet Asset Paths Break on Alternate Launch CWD**:
+   - Error: POS image URLs resolved to placeholders because the asset server root depended on the current working directory.
+   - Root cause: `assets_dir="src/assets"` was relative, so launching the app from a different location could point Flet at the wrong folder.
+   - Fix: Computed `ASSETS_DIR` with `os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "assets"))` and passed that absolute path into `ft.app(...)`.
+   - Files touched: `src/ui/app.py`.
+   - Prevention: Use absolute asset paths for Flet whenever the app can be started from more than one working directory.
+
+31. **Inventory List Rows Needed Card Grid Rendering**:
+   - Error: The inventory main panel still rendered long table-like rows instead of the image-backed card layout used elsewhere in the UI.
+   - Root cause: `ProductsScreen._display_items()` built one row container per item and had no inventory card builder or quick stock-in entry point.
+   - Fix: Added an `IMAGE_MAP`, introduced `_build_inv_card()`, rebuilt `_display_items()` as a 4-column card grid, and added `_handle_stock_in_for()` to preselect the clicked item in the stock-in dialog.
+   - Files touched: `src/ui/screens/products_screen.py`.
+   - Prevention: Keep renderer methods isolated by view mode so switching from list layouts to grid layouts only changes one display path.
+
+32. **Inventory Grid Needed Fail-Safe Rendering Path**:
+   - Error: The inventory main panel could go blank if one card build or grid refresh raised during `_display_items()`.
+   - Root cause: The new image-card renderer had no outer exception boundary, and a single bad item could abort the full panel render without a visible fallback.
+   - Fix: Wrapped `_display_items()` and `_build_inv_card()` in safe fallback handling and added `_update_snapshot()` so snapshot refresh is isolated from grid rendering.
+   - Files touched: `src/ui/screens/products_screen.py`, `src/ui/app.py`.
+   - Prevention: When replacing a full list renderer with card composition, give both the per-item builder and the top-level display method visible fallback states instead of silent failure.

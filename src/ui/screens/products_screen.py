@@ -14,6 +14,20 @@ from src.ui.components.ui_helpers import (
 
 MENU_BG = HMSColors.BG
 MENU_EMERALD = HMSColors.ACCENT
+IMAGE_MAP = {
+    "Paneer Tikka": "/images/paneer_tikka.jpg",
+    "Samosa": "/images/samosa.jpg",
+    "Coke": "/images/coke.jpg",
+    "Lassi": "/images/lassi.jpg",
+    "Mango Juice": "/images/mango_juice.jpg",
+    "Naan": "/images/butter_naan.jpg",
+    "Butter Chicken": "/images/butter_chicken.jpg",
+    "Biryani": "/images/biriyani.jpg",
+    "Dosa": "/images/dosa.jpg",
+    "Masala Dosa": "/images/masala_dosa.jpg",
+    "Idli": "/images/idli.jpg",
+    "Ghee Dosa": "/images/ghee_dosa.jpg",
+}
 
 
 class ProductsScreen(ft.Column):
@@ -28,7 +42,7 @@ class ProductsScreen(ft.Column):
 
         self.ledger_entries = []
 
-        self.items_list = ft.Column(spacing=8, expand=True, scroll=ft.ScrollMode.AUTO)
+        self.items_list = ft.Column(spacing=12, expand=True, scroll=ft.ScrollMode.AUTO)
         self.alerts_list = ft.Column(spacing=8)
         self.ledger_list = ft.Column(spacing=6)
         self.snapshot_container = ft.Container(
@@ -209,114 +223,331 @@ class ProductsScreen(ft.Column):
             tight=True,
         )
 
-    def _display_items(self, items=None):
-        """Display items in list."""
-        if items is None:
-            items = self.items
-        self.items_list.controls.clear()
-        self.alerts_list.controls.clear()
-        self.ledger_list.controls.clear()
-
-        for item in items:
-            stock = int(item.get("stock_on_hand", 0))
-            reorder = int(item.get("reorder_level", 10))
-
-            # Stock indicator
-            if stock <= 0:
-                stock_color = HMSColors.ERROR
-                stock_badge = "OUT"
-            elif stock < reorder:
-                stock_color = HMSColors.WARNING
-                stock_badge = "LOW"
-            else:
-                stock_color = HMSColors.SUCCESS
-                stock_badge = "IN STOCK"
-
-            item_id = item.get("id", "")
-            row = ft.Container(
-                content=ft.Row(
-                    [
-                        ft.Text(str(item["name"]), size=14, weight=ft.FontWeight.W_600, color=HMSColors.TEXT_PRIMARY, width=200),
-                        tag_chip(str(item["category"]).title(), HMSColors.SURFACE2, HMSColors.TEXT_SECONDARY),
-                        ft.Text(f"Rs.{float(item['unit_price']):.2f}", size=13, color=HMSColors.ACCENT2, width=90, font_family="DM Mono"),
-                        stock_bar(stock, max(reorder * 3, stock, 1), stock_color),
-                        ft.Text(str(reorder), size=12, color=HMSColors.TEXT_SECONDARY, width=60),
-                        status_tag(stock_badge, stock_color),
-                        ft.IconButton(
-                            icon=ft.icons.EDIT,
-                            icon_color=HMSColors.ACCENT,
-                            icon_size=20,
-                            tooltip="Edit product",
-                            on_click=lambda e, iid=item_id: self._handle_edit_product(iid),
-                        ),
-                        ft.IconButton(
-                            icon=ft.icons.ARCHIVE,
-                            icon_color=HMSColors.RED,
-                            icon_size=20,
-                            tooltip="Archive product",
-                            on_click=lambda e, iid=item_id: self._handle_archive_product(iid),
-                        ),
-                    ],
-                    spacing=12,
-                    wrap=True,
-                    alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
-                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                ),
-                padding=12,
-                bgcolor=HMSColors.SURFACE,
-                border_radius=8,
-                border=ft.border.all(1, HMSColors.BORDER),
-            )
-            self.items_list.controls.append(row)
-
-            if stock_badge in ("LOW", "OUT"):
-                self.alerts_list.controls.append(
-                    ft.Container(
-                        bgcolor=HMSColors.RED_DIM if stock_badge == "OUT" else HMSColors.YELLOW_DIM,
-                        border=ft.border.all(1, HMSColors.RED + "66" if stock_badge == "OUT" else HMSColors.YELLOW + "66"),
-                        border_radius=8,
-                        padding=10,
-                        content=ft.Column(
-                            [
-                                ft.Text(item["name"], size=12, weight=ft.FontWeight.W_600, color=HMSColors.TEXT_PRIMARY),
-                                ft.Text(f"{stock} / {reorder} units", size=11, color=HMSColors.TEXT_SECONDARY),
-                            ],
-                            spacing=2,
-                            tight=True,
-                        ),
-                    )
-                )
-
-        self.snapshot_container.content = self._build_snapshot()
+    def _update_snapshot(self):
+        """Rebuild snapshot counts in sidebar."""
         try:
-            self.snapshot_container.update()
+            if hasattr(self, "snapshot_container"):
+                self.snapshot_container.content = self._build_snapshot()
+                self.snapshot_container.update()
         except Exception:
             pass
 
-        if not self.alerts_list.controls:
-            self.alerts_list.controls.append(ft.Text("No critical alerts", color=HMSColors.TEXT_SECONDARY, size=12))
+    def _build_inv_card(self, item: dict) -> ft.Container:
+        try:
+            stock = int(item.get("stock_on_hand", 0))
+            reorder = int(item.get("reorder_level", 10))
+            price = float(item.get("unit_price", 0))
+            item_id = str(item.get("id", ""))
+            name = str(item.get("name", ""))
+            category = str(item.get("category", ""))
 
-        if not self.ledger_entries:
-            self.ledger_list.controls.append(ft.Text("No recent ledger activity", color=HMSColors.TEXT_SECONDARY, size=12))
-        else:
-            for entry in self.ledger_entries[:20]:
-                et = str(entry.get("event_type", "inventory.event"))
-                color = HMSColors.YELLOW
-                if "add" in et or "purchase" in et:
-                    color = HMSColors.GREEN
-                if "deduct" in et or "wastage" in et:
-                    color = HMSColors.RED
-                ts = str(entry.get("created_at", ""))[:19].replace("T", " ")
-                self.ledger_list.controls.append(
-                    activity_item(et, str(entry.get("description", "Stock activity")), ts, color)
+            if stock <= 0:
+                status_text = "✕ OUT OF STOCK"
+                status_color = "#EF4444"
+                bar_color = "#EF4444"
+                card_border = "#EF444440"
+            elif stock <= reorder:
+                status_text = "⚠ LOW STOCK"
+                status_color = "#EAB308"
+                bar_color = "#EAB308"
+                card_border = "#EAB30840"
+            else:
+                status_text = "✓ IN STOCK"
+                status_color = "#22C55E"
+                bar_color = "#22C55E"
+                card_border = "#2A3349"
+
+            max_stock = max(reorder * 3, stock, 1)
+            bar_ratio = min(stock / max_stock, 1.0)
+            bar_fill_w = int(160 * bar_ratio)
+            img_src = IMAGE_MAP.get(name, "/images/placeholder.jpg")
+
+            return ft.Container(
+                height=160,
+                border_radius=10,
+                clip_behavior=ft.ClipBehavior.ANTI_ALIAS,
+                border=ft.border.all(1, card_border),
+                content=ft.Stack(
+                    [
+                        ft.Image(
+                            src=img_src,
+                            fit=ft.ImageFit.COVER,
+                            width=float("inf"),
+                            height=160,
+                            error_content=ft.Container(
+                                bgcolor="#1E2535",
+                                width=float("inf"),
+                                height=160,
+                                alignment=ft.alignment.center,
+                                content=ft.Text("🍽", size=36, text_align=ft.TextAlign.CENTER),
+                            ),
+                        ),
+                        ft.Container(
+                            width=float("inf"),
+                            height=160,
+                            gradient=ft.LinearGradient(
+                                begin=ft.alignment.top_center,
+                                end=ft.alignment.bottom_center,
+                                colors=["#44000000", "#EE000000"],
+                            ),
+                        ),
+                        ft.Container(
+                            padding=ft.padding.all(10),
+                            width=float("inf"),
+                            height=160,
+                            content=ft.Column(
+                                [
+                                    ft.Row(
+                                        [
+                                            ft.Column(
+                                                [
+                                                    ft.Text(
+                                                        name,
+                                                        size=13,
+                                                        weight=ft.FontWeight.W_700,
+                                                        color="#FFFFFF",
+                                                        overflow=ft.TextOverflow.ELLIPSIS,
+                                                        max_lines=1,
+                                                    ),
+                                                    ft.Text(category, size=10, color="#AAFFFFFF"),
+                                                ],
+                                                spacing=2,
+                                                expand=True,
+                                            ),
+                                            ft.Container(
+                                                width=28,
+                                                height=28,
+                                                border_radius=6,
+                                                bgcolor="#FFFFFF15",
+                                                border=ft.border.all(1, "#FFFFFF25"),
+                                                alignment=ft.alignment.center,
+                                                on_click=lambda e, iid=item_id: self._handle_edit_product(iid),
+                                                content=ft.Icon(ft.Icons.EDIT, size=14, color="#FFB347"),
+                                            ),
+                                            ft.Container(width=4),
+                                            ft.Container(
+                                                width=28,
+                                                height=28,
+                                                border_radius=6,
+                                                bgcolor="#22C55E20",
+                                                border=ft.border.all(1, "#22C55E40"),
+                                                alignment=ft.alignment.center,
+                                                on_click=lambda e, current=item: self._handle_stock_in_for(current),
+                                                content=ft.Icon(ft.Icons.ADD, size=14, color="#22C55E"),
+                                            ),
+                                        ],
+                                        spacing=4,
+                                        vertical_alignment=ft.CrossAxisAlignment.START,
+                                    ),
+                                    ft.Container(expand=True),
+                                    ft.Column(
+                                        [
+                                            ft.Row(
+                                                [
+                                                    ft.Text(f"{stock}", size=11, color="#FFFFFF", font_family="DM Mono"),
+                                                    ft.Text(f"/ {reorder} reorder", size=10, color="#88FFFFFF"),
+                                                ],
+                                                spacing=4,
+                                            ),
+                                            ft.Stack(
+                                                [
+                                                    ft.Container(height=4, width=160, bgcolor="#FFFFFF20", border_radius=2),
+                                                    ft.Container(
+                                                        height=4,
+                                                        width=max(bar_fill_w, 3),
+                                                        bgcolor=bar_color,
+                                                        border_radius=2,
+                                                    ),
+                                                ]
+                                            ),
+                                        ],
+                                        spacing=4,
+                                        tight=True,
+                                    ),
+                                    ft.Container(height=4),
+                                    ft.Row(
+                                        [
+                                            ft.Text(
+                                                f"₹{price:.0f}",
+                                                size=14,
+                                                weight=ft.FontWeight.W_700,
+                                                color="#FFB347",
+                                                font_family="DM Mono",
+                                            ),
+                                            ft.Container(
+                                                padding=ft.padding.symmetric(horizontal=6, vertical=2),
+                                                border_radius=4,
+                                                bgcolor=status_color + "20",
+                                                border=ft.border.all(1, status_color + "50"),
+                                                content=ft.Text(
+                                                    status_text,
+                                                    size=9,
+                                                    color=status_color,
+                                                    weight=ft.FontWeight.W_600,
+                                                ),
+                                            ),
+                                        ],
+                                        alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                                    ),
+                                ],
+                                spacing=0,
+                                tight=True,
+                            ),
+                        ),
+                    ]
+                ),
+            )
+        except Exception:
+            return ft.Container(
+                height=160,
+                border_radius=10,
+                bgcolor="#1E2535",
+                border=ft.border.all(1, "#2A3349"),
+                padding=12,
+                content=ft.Column(
+                    [
+                        ft.Text(
+                            str(item.get("name", "?")),
+                            size=13,
+                            color="#F0F4FF",
+                            weight=ft.FontWeight.W_600,
+                        ),
+                        ft.Text(str(item.get("category", "")), size=11, color="#8B96B0"),
+                        ft.Container(expand=True),
+                        ft.Text(f"₹{float(item.get('unit_price', 0)):.0f}", size=14, color="#FFB347"),
+                    ],
+                    spacing=4,
+                    tight=True,
+                ),
+            )
+
+    def _display_items(self, items=None):
+        """Display items in card grid."""
+        try:
+            if items is None:
+                items = self.items
+
+            self.items_list.controls.clear()
+            self.alerts_list.controls.clear()
+            self.ledger_list.controls.clear()
+
+            for item in items:
+                stock = int(item.get("stock_on_hand", 0))
+                reorder = int(item.get("reorder_level", 10))
+
+                if stock <= 0:
+                    stock_badge = "OUT"
+                elif stock < reorder:
+                    stock_badge = "LOW"
+                else:
+                    stock_badge = "IN STOCK"
+
+                if stock_badge in ("LOW", "OUT"):
+                    self.alerts_list.controls.append(
+                        ft.Container(
+                            bgcolor=HMSColors.RED_DIM if stock_badge == "OUT" else HMSColors.YELLOW_DIM,
+                            border=ft.border.all(1, HMSColors.RED + "66" if stock_badge == "OUT" else HMSColors.YELLOW + "66"),
+                            border_radius=8,
+                            padding=10,
+                            content=ft.Column(
+                                [
+                                    ft.Text(item["name"], size=12, weight=ft.FontWeight.W_600, color=HMSColors.TEXT_PRIMARY),
+                                    ft.Text(f"{stock} / {reorder} units", size=11, color=HMSColors.TEXT_SECONDARY),
+                                ],
+                                spacing=2,
+                                tight=True,
+                            ),
+                        )
+                    )
+
+            if not items:
+                self.items_list.controls.append(
+                    ft.Container(
+                        padding=40,
+                        alignment=ft.alignment.center,
+                        content=ft.Text(
+                            "No items found",
+                            size=14,
+                            color="#4B5675",
+                        ),
+                    )
                 )
+            else:
+                row_size = 4
+                for index in range(0, len(items), row_size):
+                    chunk = items[index:index + row_size]
+                    cards = [
+                        ft.Container(
+                            expand=True,
+                            content=self._build_inv_card(item),
+                        )
+                        for item in chunk
+                    ]
+                    while len(cards) < row_size:
+                        cards.append(ft.Container(expand=True))
+                    self.items_list.controls.append(
+                        ft.Row(
+                            cards,
+                            spacing=12,
+                            vertical_alignment=ft.CrossAxisAlignment.START,
+                        )
+                    )
 
-        for ctl in [self.items_list, self.alerts_list, self.ledger_list]:
             try:
-                if ctl.page:
-                    ctl.update()
+                self.items_list.update()
             except Exception:
                 pass
+
+            self._rebuild_category_dropdown()
+            self._update_snapshot()
+
+            if not self.alerts_list.controls:
+                self.alerts_list.controls.append(ft.Text("No critical alerts", color=HMSColors.TEXT_SECONDARY, size=12))
+
+            if not self.ledger_entries:
+                self.ledger_list.controls.append(ft.Text("No recent ledger activity", color=HMSColors.TEXT_SECONDARY, size=12))
+            else:
+                for entry in self.ledger_entries[:20]:
+                    et = str(entry.get("event_type", "inventory.event"))
+                    color = HMSColors.YELLOW
+                    if "add" in et or "purchase" in et:
+                        color = HMSColors.GREEN
+                    if "deduct" in et or "wastage" in et:
+                        color = HMSColors.RED
+                    ts = str(entry.get("created_at", ""))[:19].replace("T", " ")
+                    self.ledger_list.controls.append(
+                        activity_item(et, str(entry.get("description", "Stock activity")), ts, color)
+                    )
+
+            for ctl in [self.alerts_list, self.ledger_list]:
+                try:
+                    if ctl.page:
+                        ctl.update()
+                except Exception:
+                    pass
+
+        except Exception as ex:
+            try:
+                self.items_list.controls.clear()
+                self.items_list.controls.append(
+                    ft.Container(
+                        padding=20,
+                        content=ft.Text(
+                            f"Display error: {str(ex)[:120]}",
+                            size=12,
+                            color="#EF4444",
+                        ),
+                    )
+                )
+                self.items_list.update()
+            except Exception:
+                pass
+
+    def _handle_stock_in_for(self, item: dict):
+        """Open stock-in dialog pre-selected for this item."""
+        self._selected_stock_in_item = item
+        self._handle_stock_in(None)
 
     def _handle_add_product(self, e):
         """Add new product dialog with form fields."""
@@ -566,12 +797,14 @@ class ProductsScreen(ft.Column):
             show_error_dialog(self.page, "Error", "No products available. Add a product first.")
             return
 
+        preselected_item = getattr(self, "_selected_stock_in_item", {})
         item_dropdown = ft.Dropdown(
             label="Select Product",
             options=[ft.dropdown.Option(item["id"], item["name"]) for item in self.items],
-            value=self.items[0]["id"] if self.items else None,
+            value=preselected_item.get("id", self.items[0]["id"] if self.items else None),
             width=300,
         )
+        self._selected_stock_in_item = None
 
         qty_field = ft.TextField(
             label="Quantity to Add",

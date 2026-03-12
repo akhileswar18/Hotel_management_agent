@@ -4,6 +4,8 @@ Main Flet Application
 Dark app shell with custom sidebar and dashboard-first routing.
 """
 
+import os as _os
+
 import flet as ft
 import httpx
 
@@ -314,7 +316,16 @@ def main():
     def run(page: ft.Page):
         HMSApp(page)
 
-    ft.app(target=run, view=ft.AppView.WEB_BROWSER, port=8080)
+    _assets = _os.path.abspath(
+        _os.path.join(_os.path.dirname(__file__), "..", "assets")
+    )
+
+    ft.app(
+        target=run,
+        view=ft.AppView.WEB_BROWSER,
+        port=8080,
+        assets_dir=_assets,
+    )
 
 
 if __name__ == "__main__":
