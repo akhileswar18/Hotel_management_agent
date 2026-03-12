@@ -6,6 +6,7 @@ Add, edit, delete menu items. Dark theme, touch-friendly.
 
 import flet as ft
 import httpx
+from src.ui.image_assets import get_menu_image_base64
 from src.ui.components.ui_helpers import (
     HMSButton, HMSColors, HMSInput, show_error_dialog, show_success_dialog, build_header,
     section_header, status_tag, stock_bar, tag_chip, activity_item,
@@ -14,20 +15,6 @@ from src.ui.components.ui_helpers import (
 
 MENU_BG = HMSColors.BG
 MENU_EMERALD = HMSColors.ACCENT
-IMAGE_MAP = {
-    "Paneer Tikka": "/images/paneer_tikka.jpg",
-    "Samosa": "/images/samosa.jpg",
-    "Coke": "/images/coke.jpg",
-    "Lassi": "/images/lassi.jpg",
-    "Mango Juice": "/images/mango_juice.jpg",
-    "Naan": "/images/butter_naan.jpg",
-    "Butter Chicken": "/images/butter_chicken.jpg",
-    "Biryani": "/images/biriyani.jpg",
-    "Dosa": "/images/dosa.jpg",
-    "Masala Dosa": "/images/masala_dosa.jpg",
-    "Idli": "/images/idli.jpg",
-    "Ghee Dosa": "/images/ghee_dosa.jpg",
-}
 
 
 class ProductsScreen(ft.Column):
@@ -260,7 +247,7 @@ class ProductsScreen(ft.Column):
             max_stock = max(reorder * 3, stock, 1)
             bar_ratio = min(stock / max_stock, 1.0)
             bar_fill_w = int(160 * bar_ratio)
-            img_src = IMAGE_MAP.get(name, "/images/placeholder.jpg")
+            image_data = get_menu_image_base64(name)
 
             return ft.Container(
                 height=160,
@@ -269,18 +256,21 @@ class ProductsScreen(ft.Column):
                 border=ft.border.all(1, card_border),
                 content=ft.Stack(
                     [
-                        ft.Image(
-                            src=img_src,
-                            fit=ft.ImageFit.COVER,
-                            width=float("inf"),
-                            height=160,
-                            error_content=ft.Container(
+                        (
+                            ft.Image(
+                                src_base64=image_data,
+                                fit=ft.ImageFit.COVER,
+                                width=float("inf"),
+                                height=160,
+                            )
+                            if image_data
+                            else ft.Container(
                                 bgcolor="#1E2535",
                                 width=float("inf"),
                                 height=160,
                                 alignment=ft.alignment.center,
                                 content=ft.Text("🍽", size=36, text_align=ft.TextAlign.CENTER),
-                            ),
+                            )
                         ),
                         ft.Container(
                             width=float("inf"),
@@ -314,27 +304,27 @@ class ProductsScreen(ft.Column):
                                                 spacing=2,
                                                 expand=True,
                                             ),
-                                            ft.Container(
-                                                width=28,
-                                                height=28,
+                                        ft.Container(
+                                            width=28,
+                                            height=28,
+                                            border_radius=6,
+                                            bgcolor="#FFFFFF15",
+                                            border=ft.border.all(1, "#FFFFFF25"),
+                                            alignment=ft.alignment.center,
+                                            on_click=lambda e, iid=item_id: self._handle_edit_product(iid),
+                                            content=ft.Icon(ft.icons.EDIT, size=14, color="#FFB347"),
+                                        ),
+                                        ft.Container(width=4),
+                                        ft.Container(
+                                            width=28,
+                                            height=28,
                                                 border_radius=6,
-                                                bgcolor="#FFFFFF15",
-                                                border=ft.border.all(1, "#FFFFFF25"),
-                                                alignment=ft.alignment.center,
-                                                on_click=lambda e, iid=item_id: self._handle_edit_product(iid),
-                                                content=ft.Icon(ft.Icons.EDIT, size=14, color="#FFB347"),
-                                            ),
-                                            ft.Container(width=4),
-                                            ft.Container(
-                                                width=28,
-                                                height=28,
-                                                border_radius=6,
-                                                bgcolor="#22C55E20",
-                                                border=ft.border.all(1, "#22C55E40"),
-                                                alignment=ft.alignment.center,
-                                                on_click=lambda e, current=item: self._handle_stock_in_for(current),
-                                                content=ft.Icon(ft.Icons.ADD, size=14, color="#22C55E"),
-                                            ),
+                                            bgcolor="#22C55E20",
+                                            border=ft.border.all(1, "#22C55E40"),
+                                            alignment=ft.alignment.center,
+                                            on_click=lambda e, current=item: self._handle_stock_in_for(current),
+                                            content=ft.Icon(ft.icons.ADD, size=14, color="#22C55E"),
+                                        ),
                                         ],
                                         spacing=4,
                                         vertical_alignment=ft.CrossAxisAlignment.START,

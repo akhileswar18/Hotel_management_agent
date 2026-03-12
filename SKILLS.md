@@ -787,3 +787,52 @@ All code is marked with `# TODO:` comments for Phase 2 work.
    - Fix: Wrapped `_display_items()` and `_build_inv_card()` in safe fallback handling and added `_update_snapshot()` so snapshot refresh is isolated from grid rendering.
    - Files touched: `src/ui/screens/products_screen.py`, `src/ui/app.py`.
    - Prevention: When replacing a full list renderer with card composition, give both the per-item builder and the top-level display method visible fallback states instead of silent failure.
+
+33. **Billing Needed Draft-Order Selection Before Finalize**:
+   - Error: The billing screen only handled previewing finalized invoices and had no table-based way to pick a pending draft order for payment.
+   - Root cause: `ReceiptScreen` lacked draft-order state, selector chips, bill-summary hydration, and a finalize flow tied to the selected pending order.
+   - Fix: Added draft-order loading, table/takeaway chips, pending bill summary, amount auto-fill, snack feedback, and API finalize logic that refreshes both recent invoices and draft table availability.
+   - Files touched: `src/ui/screens/receipt_screen.py`.
+   - Prevention: Separate "pick pending order" state from "preview finalized invoice" state whenever a billing screen needs to support both collection and reprint workflows.
+
+34. **Flet 0.80.5 Text Does Not Support `letter_spacing`**:
+   - Error: `Text.__init__() got an unexpected keyword argument 'letter_spacing'` on billing screen startup.
+   - Root cause: A prompt-derived `ft.Text(...)` used `letter_spacing`, but that parameter is not supported by the Flet version in this repo.
+   - Fix: Removed the unsupported `letter_spacing` argument from the billing screen's "SELECT ORDER" label.
+   - Files touched: `src/ui/screens/receipt_screen.py`.
+   - Prevention: When applying UI prompts to Flet, cross-check text style parameters against the repo's installed Flet version before patching.
+
+35. **Flet 0.80.5 Uses `ft.icons`, Not `ft.Icons`**:
+   - Error: `module 'flet' has no attribute 'Icons'` after login when newly patched screens were instantiated.
+   - Root cause: Prompt-derived code used `ft.Icons.*`, but this repo's Flet version exposes icon constants via `ft.icons.*`.
+   - Fix: Replaced the new `ft.Icons` usages in billing and inventory with `ft.icons`.
+   - Files touched: `src/ui/screens/receipt_screen.py`, `src/ui/screens/products_screen.py`.
+   - Prevention: Match icon enum casing to the installed Flet API before introducing new icon constants.
+
+36. **Billing Left Panel Needed Flet-Safe Control Props**:
+   - Error: The billing selector patch could blank the left panel during initialization under Flet 0.80.5.
+   - Root cause: The new flow relied on unsupported/fragile control patterns such as `disabled` on `ft.ElevatedButton`, `tooltip` on `ft.Container`, and eager state changes during init.
+   - Fix: Moved draft-order loading to the safe post-layout sequence, removed the container tooltip, and replaced button disabling with an `on_click`/color-based `_set_confirm_enabled()` helper.
+   - Files touched: `src/ui/screens/receipt_screen.py`.
+   - Prevention: For Flet 0.80.5, prefer explicit click-handler toggling and post-`super().__init__()` data hydration over unsupported widget-state props.
+
+37. **Avoid `expand=True` Inside Tight Billing Columns**:
+   - Error: The billing left panel could render as an empty area after the selector patch even though the screen itself mounted.
+   - Root cause: The new confirm button was set to `expand=True` inside a `Column(tight=True)`, which creates an unstable flex layout in Flet.
+   - Fix: Reverted the confirm button to a fixed width/height button in the billing form.
+   - Files touched: `src/ui/screens/receipt_screen.py`.
+   - Prevention: In Flet, avoid mixing `expand=True` with `tight=True` in the same vertical form layout unless the parent column is explicitly designed for flex sizing.
+
+38. **Billing Recent Invoices Need a Bounded Scroll Region**:
+   - Error: The recent invoice cards extended past the visible billing panel with no way to scroll through the full list.
+   - Root cause: The invoice list was rendered in an unconstrained column, so content height kept growing instead of becoming a scrollable region.
+   - Fix: Enabled scrolling on `recent_list` and wrapped it in a fixed-height container inside the billing card.
+   - Files touched: `src/ui/screens/receipt_screen.py`.
+   - Prevention: When rendering long record lists in Flet side panels, give the list an explicit scroll mode and a bounded height.
+
+39. **Card Images Should Not Depend on Runtime Asset URLs**:
+   - Error: POS and inventory cards still fell back to the placeholder art even though `/images/...` returned `200 image/jpeg` from the running app.
+   - Root cause: The card renderer depended on runtime URL-based `ft.Image(src=...)` resolution, which remained brittle in the current Flet web flow despite the asset endpoint being healthy.
+   - Fix: Centralized menu image loading in `src/ui/image_assets.py` and switched card images to cached local `src_base64` data, removing the HTTP asset-path dependency for these UI cards.
+   - Files touched: `src/ui/image_assets.py`, `src/ui/screens/pos_screen.py`, `src/ui/screens/products_screen.py`.
+   - Prevention: For frequently reused local UI assets, prefer a validated base64/image helper over per-screen URL strings so rendering does not rely on web asset routing.

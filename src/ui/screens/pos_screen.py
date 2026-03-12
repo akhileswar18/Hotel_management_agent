@@ -10,6 +10,7 @@ import httpx
 from uuid import uuid4
 from datetime import datetime
 from typing import Callable, Optional
+from src.ui.image_assets import get_menu_image_base64
 from src.ui.components.ui_helpers import (
     HMSButton,
     OrderSummaryWidget,
@@ -28,20 +29,6 @@ from src.ui.components.ui_helpers import (
 POS_EMERALD = "#10b981"
 POS_BG = HMSColors.BG_PRIMARY
 POS_CARD_BG = HMSColors.BG_SECONDARY
-IMAGE_MAP = {
-    "Paneer Tikka": "/images/paneer_tikka.jpg",
-    "Samosa": "/images/samosa.jpg",
-    "Coke": "/images/coke.jpg",
-    "Lassi": "/images/lassi.jpg",
-    "Mango Juice": "/images/mango_juice.jpg",
-    "Naan": "/images/butter_naan.jpg",
-    "Butter Chicken": "/images/butter_chicken.jpg",
-    "Biryani": "/images/biriyani.jpg",
-    "Dosa": "/images/dosa.jpg",
-    "Masala Dosa": "/images/masala_dosa.jpg",
-    "Idli": "/images/idli.jpg",
-    "Ghee Dosa": "/images/ghee_dosa.jpg",
-}
 
 
 class POSScreen(ft.Column):
@@ -370,7 +357,7 @@ class POSScreen(ft.Column):
             stock_text = f"✓ In Stock ({stock})"
             stock_color = "#22C55E"
 
-        image_src = IMAGE_MAP.get(str(item.get("name", "")), "/images/placeholder.jpg")
+        image_data = get_menu_image_base64(str(item.get("name", "")))
 
         def _add(_):
             if int(item.get("stock_on_hand", 0)) > 0:
@@ -385,12 +372,15 @@ class POSScreen(ft.Column):
             on_click=None if is_out else _add,
             content=ft.Stack(
                 [
-                    ft.Image(
-                        src=image_src,
-                        fit=ft.ImageFit.COVER,
-                        width=float("inf"),
-                        height=130,
-                        error_content=ft.Container(
+                    (
+                        ft.Image(
+                            src_base64=image_data,
+                            fit=ft.ImageFit.COVER,
+                            width=float("inf"),
+                            height=130,
+                        )
+                        if image_data
+                        else ft.Container(
                             bgcolor=HMSColors.SURFACE2,
                             width=float("inf"),
                             height=130,
@@ -400,7 +390,7 @@ class POSScreen(ft.Column):
                                 text_align=ft.TextAlign.CENTER,
                             ),
                             alignment=ft.alignment.center,
-                        ),
+                        )
                     ),
                     ft.Container(
                         width=float("inf"),
