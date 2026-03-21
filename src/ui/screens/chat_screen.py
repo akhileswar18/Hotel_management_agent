@@ -10,7 +10,7 @@ Three-panel layout:
 from datetime import datetime
 import os
 import threading
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 import flet as ft
 import httpx
@@ -36,6 +36,7 @@ class ChatScreen(ft.Column):
         user_role: str = "WAITER",
         user_id: str = "",
         user_info: Optional[dict] = None,
+        on_kitchen_update: Optional[Callable[[dict], None]] = None,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -47,6 +48,7 @@ class ChatScreen(ft.Column):
             "role": self.user_role,
             "user_id": self.user_id,
         }
+        self._on_kitchen_update = on_kitchen_update
 
         self.expand = True
         self.mode = "ask"  # ask | command | voice
@@ -532,6 +534,7 @@ class ChatScreen(ft.Column):
                 trace = self._build_trace_steps("command", "success", {"engine": parsed_by, "action": intent.get("action", "unknown")})
                 self._append_agent_message(message, ok=True, trace_steps=trace)
                 self._mark_agent_activity(["OrchestratorAgent", "OrderAgent", "PaymentAgent", "AuditAgent"])
+                self._emit_kitchen_update(data)
             elif status == "error":
                 self._pending_intent = None
                 trace = self._build_trace_steps("command", "error", {"engine": parsed_by, "action": intent.get("action", "unknown")})
@@ -545,6 +548,15 @@ class ChatScreen(ft.Column):
         except Exception as ex:
             self._pending_intent = None
             self._append_agent_message(f"Command request failed: {str(ex)[:120]}", ok=False)
+
+    def _emit_kitchen_update(self, payload: Optional[dict] = None):
+        """Forward order workflow updates so KDS can refresh immediately."""
+        if not self._on_kitchen_update:
+            return
+        try:
+            self._on_kitchen_update(payload or {})
+        except Exception:
+            pass
 
     def _build_followup_chips(self, missing_fields: List[str], intent: Dict[str, Any]) -> List[str]:
         chips: List[str] = []

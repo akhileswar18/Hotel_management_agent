@@ -620,6 +620,15 @@ class OrderHistoryScreen(ft.Column):
         self._refresh()
         self._update_clock()
 
+    def notify_external_update(self, payload: Optional[dict] = None):
+        """Refresh KDS immediately when other screens complete order workflows."""
+        self._load_orders()
+        self._render_orders()
+        try:
+            self.page.update()
+        except Exception:
+            pass
+
     def cleanup(self):
         if self._refresh_timer:
             self._refresh_timer.cancel()

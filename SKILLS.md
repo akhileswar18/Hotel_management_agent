@@ -920,3 +920,44 @@ All code is marked with `# TODO:` comments for Phase 2 work.
    - Fix: Removed direct `nav_column.update()` in sidebar builder, reduced unnecessary sidebar rebuilds in low-stock refresh flow, centralized route redraw to one `page.update()`, and wrapped toast `page.update()` in safe exception handling.
    - Files touched: `src/ui/app.py`, `src/ui/components/ui_helpers.py`.
    - Prevention: Avoid multiple competing updates during route transitions; mutate state first, then perform a single top-level page update and guard non-critical UI updates.
+
+50. **Insight Query SQL Alias Mismatch Broke Ask Mode**:
+   - Error: `no such column: p.payment_method` from `/api/insights/query`.
+   - Root cause: Query selected/filtered `p.payment_method` while payments schema uses `method`.
+   - Fix: Updated select/filter to use `p.method` with alias `payment_method`.
+   - Files touched: `src/application/services.py`.
+   - Prevention: Keep reporting SQL column names aligned with repository schema; use aliases only for response shape.
+
+51. **PaymentAgent Contract Metadata Did Not Match Behavior**:
+   - Error: Contract test expected `PaymentAgent.writes_to_db is True`.
+   - Root cause: Agent class metadata advertised `writes_to_db = False` despite recording payments.
+   - Fix: Set `writes_to_db = True`.
+   - Files touched: `src/agents/payment_agent.py`.
+   - Prevention: Treat agent capability flags as testable contracts and update them whenever behavior changes.
+
+52. **Launcher Runtime Did Not Reliably Pick .env for LLM Provider**:
+   - Error: Runtime could start without expected OpenRouter env values in some launch paths.
+   - Root cause: Launcher process startup relied on ambient environment only.
+   - Fix: Added `.env` loader during launcher startup to hydrate `os.environ` before bootstrapping API/UI.
+   - Files touched: `src/launcher.py`.
+   - Prevention: Centralize env hydration in entrypoints used for local production-style runs.
+
+53. **Insight Degradation Message Contract Drift**:
+   - Error: Smoke tests expected `"Insight unavailable"` message for non-LLM fallback responses.
+   - Root cause: Fallback payloads returned source/answer but omitted stable message contract.
+   - Fix: Added fallback message normalization in insight query and upsell endpoints when source is non-LLM.
+   - Files touched: `src/api/app.py`.
+   - Prevention: Keep fallback response shape stable across providers so UI/tests do not depend on provider-specific branches.
+
+54. **Orchestrator Step Payload Regression (`user_id`)**:
+   - Error: Unit test failed with `KeyError: 'user_id'` in decomposed `order.create` step payload.
+   - Root cause: Refactor moved user propagation to event metadata only, but tests/contracts still require payload field.
+   - Fix: Added `user_id` back into `order.create` step payload.
+   - Files touched: `src/agents/orchestrator_agent.py`.
+   - Prevention: Preserve compatibility fields in orchestration payloads unless all downstream contracts/tests are updated together.
+55. **AI Command Flow Did Not Trigger Immediate KDS Refresh**:
+   - Error: Orders created/finalized from AI Agent were persisted but Kitchen Display did not refresh immediately.
+   - Root cause: `ChatScreen` command-success path had no kitchen-update callback wiring to app shell/KDS.
+   - Fix: Wired shared `on_kitchen_update` callback through `HMSApp` into both `POSScreen` and `ChatScreen`, and added `OrderHistoryScreen.notify_external_update()` to force KDS reload.
+   - Files touched: `src/ui/app.py`, `src/ui/screens/chat_screen.py`, `src/ui/screens/order_history_screen.py`.
+   - Prevention: Any flow that mutates order lifecycle must emit one common kitchen-refresh signal, not screen-local refresh logic.

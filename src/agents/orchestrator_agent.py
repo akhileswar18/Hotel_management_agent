@@ -44,7 +44,8 @@ class OrchestratorAgent(BaseAgent):
                 "type": "order.create",
                 "payload": {
                     "table_id": intent.get("table_id", "1"),
-                    # user_id will be inherited from event.user_id in _execute_steps
+                    # Keep user_id in payload for compatibility with existing tests/contracts.
+                    "user_id": intent.get("user_id", ""),
                 },
             })
             for item in intent.get("items", []):
