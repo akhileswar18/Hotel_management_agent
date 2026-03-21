@@ -9,11 +9,17 @@ from functools import lru_cache
 from typing import Dict, List, Optional
 
 from pydantic import Field
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
     """Application settings loaded from environment/.env."""
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        env_nested_delimiter="__",
+        extra="ignore",
+    )
 
     voice_primary_language: str = Field(
         default="te-IN", alias="VOICE_PRIMARY_LANGUAGE"
@@ -41,11 +47,6 @@ class Settings(BaseSettings):
         alias="MENU_SYNONYMS_FILE",
     )
     llm_provider: str = Field(default="groq", alias="LLM_PROVIDER")
-
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
-        env_nested_delimiter = "__"
 
 
 @lru_cache(maxsize=1)

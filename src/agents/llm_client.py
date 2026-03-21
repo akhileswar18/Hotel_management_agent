@@ -1,5 +1,5 @@
 """
-LLM Client — Configurable client for OpenAI, Groq, or Ollama.
+LLM Client - Configurable client for OpenAI, Groq, OpenRouter, or Ollama.
 
 Used by InsightAgent and IntentParser (LLM mode). Timeout and graceful
 degradation are critical:
@@ -9,6 +9,7 @@ degradation are critical:
 Supported providers (set LLM_PROVIDER env):
 - openai: Default for paid API; GPT-4o-mini (needs LLM_API_KEY or OPENAI_API_KEY)
 - groq: Groq cloud (needs GROQ_API_KEY)
+- openrouter: OpenRouter cloud (needs OPENROUTER_API_KEY or LLM_API_KEY)
 - ollama: Local; set LLM_PROVIDER=ollama when using local Ollama (no API key)
 """
 
@@ -20,13 +21,14 @@ logger = logging.getLogger("hms.llm")
 
 
 class LLMClient:
-    """Configurable LLM client — Ollama (local), Groq, or OpenAI (cloud)."""
+    """Configurable LLM client - Ollama (local), Groq/OpenAI/OpenRouter (cloud)."""
 
     # Default models per provider
     DEFAULT_MODELS = {
         "ollama": "llama3.2",
         "groq": "llama-3.3-70b-versatile",
         "openai": "gpt-4o-mini",
+        "openrouter": "meta-llama/llama-3.3-70b-instruct",
     }
 
     def __init__(
@@ -47,6 +49,8 @@ class LLMClient:
             self.api_key = api_key
         elif self.provider == "groq":
             self.api_key = os.environ.get("GROQ_API_KEY", os.environ.get("LLM_API_KEY", ""))
+        elif self.provider == "openrouter":
+            self.api_key = os.environ.get("OPENROUTER_API_KEY", os.environ.get("LLM_API_KEY", ""))
         else:
             self.api_key = os.environ.get("LLM_API_KEY", os.environ.get("OPENAI_API_KEY", ""))
 
@@ -55,6 +59,8 @@ class LLMClient:
             self.base_url = base_url.rstrip("/")
         elif self.provider == "groq":
             self.base_url = os.environ.get("LLM_BASE_URL", "https://api.groq.com/openai").rstrip("/")
+        elif self.provider == "openrouter":
+            self.base_url = os.environ.get("LLM_BASE_URL", "https://openrouter.ai/api").rstrip("/")
         elif self.provider == "openai":
             self.base_url = os.environ.get("LLM_BASE_URL", "https://api.openai.com").rstrip("/")
         else:
@@ -63,7 +69,7 @@ class LLMClient:
     @property
     def is_available(self) -> bool:
         """Quick check if the LLM is likely reachable (has API key for cloud providers)."""
-        if self.provider in ("groq", "openai"):
+        if self.provider in ("groq", "openai", "openrouter"):
             return bool(self.api_key)
         return True  # Ollama doesn't need a key
 
@@ -72,7 +78,7 @@ class LLMClient:
         try:
             if self.provider == "ollama":
                 return self._query_ollama(prompt, system_prompt)
-            if self.provider in ("openai", "groq"):
+            if self.provider in ("openai", "groq", "openrouter"):
                 return self._query_openai_compatible(prompt, system_prompt)
             logger.warning(f"Unknown LLM provider: {self.provider}")
             return None
@@ -125,6 +131,9 @@ class LLMClient:
             headers = {"Content-Type": "application/json"}
             if self.api_key:
                 headers["Authorization"] = f"Bearer {self.api_key}"
+            if self.provider == "openrouter":
+                headers["HTTP-Referer"] = "http://localhost:8080"
+                headers["X-Title"] = "HMA Hotel Management Agent"
 
             body = {
                 "model": self.model,

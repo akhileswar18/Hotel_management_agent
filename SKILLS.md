@@ -836,3 +836,87 @@ All code is marked with `# TODO:` comments for Phase 2 work.
    - Fix: Centralized menu image loading in `src/ui/image_assets.py` and switched card images to cached local `src_base64` data, removing the HTTP asset-path dependency for these UI cards.
    - Files touched: `src/ui/image_assets.py`, `src/ui/screens/pos_screen.py`, `src/ui/screens/products_screen.py`.
    - Prevention: For frequently reused local UI assets, prefer a validated base64/image helper over per-screen URL strings so rendering does not rely on web asset routing.
+
+40. **KDS Table Labels Should Use One Stable Field and Compact Actions**:
+   - Error: Kitchen tickets could show misleading table labels and the footer action text could overflow on narrower cards.
+   - Root cause: The KDS header mixed `table_number` and `table_id` even though the API response is standardized on `table_id`, and the action buttons used longer labels with roomy defaults.
+   - Fix: Added a single `_table_display_label()` helper based on `table_id`/takeaway normalization and compacted KDS action buttons with shorter labels and tighter text/padding.
+   - Files touched: `src/ui/screens/order_history_screen.py`.
+   - Prevention: Normalize display labels from the API response model once per screen, and keep action labels short in dense card-grid UIs.
+
+41. **Flet 0.80.5 ButtonStyle Does Not Support `text_style`**:
+   - Error: `ButtonStyle.__init__() got an unexpected keyword argument 'text_style'` during screen construction.
+   - Root cause: The KDS button compaction patch used `text_style` on `ft.ButtonStyle`, which is not supported by the Flet version in this repo.
+   - Fix: Removed the unsupported `text_style` argument and kept the button compact with padding and height only.
+   - Files touched: `src/ui/screens/order_history_screen.py`.
+   - Prevention: Treat prompt-suggested style kwargs as version-dependent and verify them against the installed Flet API before patching.
+
+40. **Flet Image `src_base64` Silent Truncation for Large Files**:
+   - Error: `Either src or src_base64 must be specified` on `ft.Image` controls on POS and Inventory screens.
+   - Root cause: High-res card images (e.g., 700KB+ JPEGs) were encoded directly into `src_base64`. Flet's websocket message limits silently drop oversized strings, meaning the Flutter frontend receives missing asset properties and crashes the image component.
+   - Fix: Reverted `src_base64` logic to URL paths via `src="/images/filename"` since `assets_dir` is safely mounted in Flet's HTTP server.
+   - Files touched: `src/ui/image_assets.py`, `src/ui/screens/pos_screen.py`, `src/ui/screens/products_screen.py`.
+   - Prevention: Never inject large base64 buffers directly into Flet layout components. For images over ~100KB, use Flet's static `assets_dir` HTTP server and reference relative `src` paths.
+
+41. **KDS Button Text Overflow on Smaller Viewports**:
+   - Error: Action buttons like "Start Cooking" and "Served — Close" overflowed and showed ellipsis ("Mark...") on Kitchen Display System cards.
+   - Root cause: Highly verbose labels inside fixed-width action buttons failed to wrap properly on cramped multi-column grids.
+   - Fix: Trimmed action verbs to "Cook", "Serve", and "Ready" for cleaner rendering.
+   - Files touched: `src/ui/screens/order_history_screen.py`.
+   - Prevention: UI button states should prioritize short imperatives ("Cook") over verbose sentences ("Start Cooking").
+
+42. **Unintentional POS Table Identifier Defaulting**:
+   - Error: Subagent runs resulted in multiple unique POS orders identically mapping to "Table 1" in the KDS view.
+   - Root cause: `ft.TextField(value="1")` was hardcoded as a fallback in the POS Table Number component, causing operators to accidentally stack diverse workflow tests onto the same default entity.
+   - Fix: Removed `value="1"` fallback strings from the TextField configuration.
+   - Files touched: `src/ui/screens/pos_screen.py`.
+   - Prevention: Do not seed live POS order-taking schemas with placeholder entity IDs, forcing operators out of "autopilot" data entry.
+
+43. **OpenRouter Provider Not Available in LLM Client**:
+   - Error: AI Chat could not route requests through OpenRouter because provider matching only handled OpenAI/Groq/Ollama.
+   - Root cause: `LLMClient` did not include `openrouter` in defaults, API key/base URL routing, availability checks, or query dispatch.
+   - Fix: Added OpenRouter support in provider model defaults, API key lookup, base URL selection, `is_available`, `query()` routing, and OpenRouter-specific headers.
+   - Files touched: `src/agents/llm_client.py`.
+   - Prevention: When adding OpenAI-compatible providers, update all provider decision points together (defaults, auth, endpoint, availability, dispatch, headers).
+
+44. **Chat Screen Hardcoded Provider Metadata**:
+   - Error: AI panel always displayed Groq metadata even after provider changes.
+   - Root cause: Provider card text was hardcoded in UI.
+   - Fix: Switched provider/model display to environment-driven values using `LLM_PROVIDER` and `LLM_MODEL`.
+   - Files touched: `src/ui/screens/chat_screen.py`.
+   - Prevention: Treat provider metadata as runtime config, not static text.
+
+45. **Flet Text `letter_spacing` in Inventory Snapshot**:
+   - Error: Inventory screen risked blank/crash due unsupported `letter_spacing` argument in current Flet build.
+   - Root cause: Snapshot label used `ft.Text(..., letter_spacing=...)`.
+   - Fix: Removed the unsupported argument from snapshot label text.
+   - Files touched: `src/ui/screens/products_screen.py`.
+   - Prevention: Avoid using advanced text kwargs unless verified in installed Flet version.
+
+46. **Receipt Confirm Button Used Deprecated Keyword Form**:
+   - Error: Billing screen risked runtime incompatibility from deprecated `ft.ElevatedButton(text=...)`.
+   - Root cause: `text=` keyword form remained in `receipt_screen.py`.
+   - Fix: Converted to positional text argument in the payment confirm button.
+   - Files touched: `src/ui/screens/receipt_screen.py`.
+   - Prevention: Use positional label arguments for `ft.ElevatedButton` in this codebase.
+
+47. **VOICE_FALLBACK_LANGUAGES Env Parsing Failure**:
+   - Error: Pydantic settings failed to parse `voice_fallback_languages` from `.env`.
+   - Root cause: List value was provided as comma-separated string instead of JSON array.
+   - Fix: Updated `.env` to use valid JSON list syntax (`[\"hi-IN\",\"en-IN\"]`).
+   - Files touched: `.env`.
+   - Prevention: For list/dict settings loaded by pydantic, store values as valid JSON in `.env`.
+
+48. **Pydantic Settings Extra-Field Crash in Agent Command Flow**:
+   - Error: `ValidationError ... Extra inputs are not permitted` when using AI Command mode.
+   - Root cause: `src/config/settings.py` loaded `.env` with strict extra-field validation while `.env` contains many app-level keys not declared in `Settings`.
+   - Fix: Switched to `SettingsConfigDict(..., extra=\"ignore\")` so unknown `.env` keys are ignored.
+   - Files touched: `src/config/settings.py`.
+   - Prevention: For shared `.env` files, keep settings models tolerant of unrelated keys (`extra=\"ignore\"`) unless strict isolation is enforced.
+
+49. **Flet AssertionError During Route Change and Refresh Toast Update**:
+   - Error: `assert self.__uid is not None` and `_process_remove_command: control with ID 'None' not found` while navigating screens/refreshing.
+   - Root cause: Sidebar controls were rebuilt with aggressive nested updates during route changes, and toast `page.update()` calls could execute while control tree remount was in-flight.
+   - Fix: Removed direct `nav_column.update()` in sidebar builder, reduced unnecessary sidebar rebuilds in low-stock refresh flow, centralized route redraw to one `page.update()`, and wrapped toast `page.update()` in safe exception handling.
+   - Files touched: `src/ui/app.py`, `src/ui/components/ui_helpers.py`.
+   - Prevention: Avoid multiple competing updates during route transitions; mutate state first, then perform a single top-level page update and guard non-critical UI updates.

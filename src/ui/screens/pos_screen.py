@@ -10,7 +10,7 @@ import httpx
 from uuid import uuid4
 from datetime import datetime
 from typing import Callable, Optional
-from src.ui.image_assets import get_menu_image_base64
+from src.ui.image_assets import get_menu_image_src
 from src.ui.components.ui_helpers import (
     HMSButton,
     OrderSummaryWidget,
@@ -76,13 +76,11 @@ class POSScreen(ft.Column):
         # Order summary widget (right panel)
         self.order_summary = OrderSummaryWidget()
 
-        # Table ID input
         self.table_id_field = ft.TextField(
             label="Table Number",
             width=150,
             height=48,
             text_size=16,
-            value="1",
         )
 
         # Buttons
@@ -357,7 +355,7 @@ class POSScreen(ft.Column):
             stock_text = f"✓ In Stock ({stock})"
             stock_color = "#22C55E"
 
-        image_data = get_menu_image_base64(str(item.get("name", "")))
+        image_src = get_menu_image_src(str(item.get("name", "")))
 
         def _add(_):
             if int(item.get("stock_on_hand", 0)) > 0:
@@ -374,12 +372,12 @@ class POSScreen(ft.Column):
                 [
                     (
                         ft.Image(
-                            src_base64=image_data,
+                            src=image_src,
                             fit=ft.ImageFit.COVER,
                             width=float("inf"),
                             height=130,
                         )
-                        if image_data
+                        if image_src
                         else ft.Container(
                             bgcolor=HMSColors.SURFACE2,
                             width=float("inf"),

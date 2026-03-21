@@ -1,15 +1,14 @@
 """
 Shared menu image helpers for Flet UI cards.
 
-Loads local asset files as base64 so card rendering does not depend on
-runtime HTTP asset-path resolution.
+Loads local asset files via Flet's static assets directory so card rendering
+does not send large base64 payloads over websockets.
 """
 
 import base64
 from functools import lru_cache
 from pathlib import Path
 from typing import Optional
-
 IMAGE_DIR = Path(__file__).resolve().parent.parent / "assets" / "images"
 IMAGE_MAP = {
     "Paneer Tikka": "paneer_tikka.jpg",
@@ -28,8 +27,8 @@ IMAGE_MAP = {
 
 
 @lru_cache(maxsize=None)
-def get_menu_image_base64(item_name: str) -> Optional[str]:
-    """Return base64-encoded image data for a known menu item."""
+def get_menu_image_src(item_name: str) -> Optional[str]:
+    """Return the relative src path for an image, e.g. /images/coke.jpg"""
     filename = IMAGE_MAP.get(item_name)
     if not filename:
         return None
@@ -38,7 +37,4 @@ def get_menu_image_base64(item_name: str) -> Optional[str]:
     if not image_path.exists():
         return None
 
-    try:
-        return base64.b64encode(image_path.read_bytes()).decode("ascii")
-    except Exception:
-        return None
+    return f"/images/{filename}"

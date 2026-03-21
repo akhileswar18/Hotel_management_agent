@@ -683,7 +683,11 @@ def show_toast(page: ft.Page, message: str, bgcolor: str = HMSColors.PRIMARY, du
         action="OK",
     )
     page.snack_bar.open = True
-    page.update()
+    try:
+        page.update()
+    except Exception:
+        # Flet can throw assertion errors when control tree is mid-remount.
+        pass
 
 
 def show_success_toast(page: ft.Page, message: str):

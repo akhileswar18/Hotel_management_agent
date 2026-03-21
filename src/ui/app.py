@@ -130,8 +130,6 @@ class HMSApp:
         self.nav_column.controls.clear()
         self.nav_items.clear()
         self.nav_column.controls.extend(items)
-        if self.nav_column.page:
-            self.nav_column.update()
 
     def _resolve_nav_icon(self, icon_name: str):
         icon_set = getattr(ft, "Icons", None)
@@ -265,6 +263,7 @@ class HMSApp:
         return item
 
     def _refresh_low_stock_badge(self):
+        prev_has_low_stock = self.has_low_stock
         count = 0
         try:
             with httpx.Client(timeout=4.0) as client:
@@ -276,7 +275,7 @@ class HMSApp:
             count = 0
         self.has_low_stock = count > 0
         self.low_stock_badge.visible = self.has_low_stock
-        if hasattr(self, "nav_column"):
+        if hasattr(self, "nav_column") and self.has_low_stock != prev_has_low_stock:
             self._build_sidebar_items()
 
     def _show_route(self, route: str):
@@ -298,8 +297,8 @@ class HMSApp:
         if callable(on_show):
             on_show()
         self._build_sidebar_items()
-        self.content_area.update()
         self._refresh_low_stock_badge()
+        self.page.update()
 
     def _show_chat_screen(self):
         self._show_route("agent")

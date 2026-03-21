@@ -6,7 +6,7 @@ Add, edit, delete menu items. Dark theme, touch-friendly.
 
 import flet as ft
 import httpx
-from src.ui.image_assets import get_menu_image_base64
+from src.ui.image_assets import get_menu_image_src
 from src.ui.components.ui_helpers import (
     HMSButton, HMSColors, HMSInput, show_error_dialog, show_success_dialog, build_header,
     section_header, status_tag, stock_bar, tag_chip, activity_item,
@@ -200,7 +200,7 @@ class ProductsScreen(ft.Column):
 
         return ft.Column(
             [
-                ft.Text("SNAPSHOT", size=10, weight=ft.FontWeight.W_600, color="#4B5675", letter_spacing=1.2),
+                ft.Text("SNAPSHOT", size=10, weight=ft.FontWeight.W_600, color="#4B5675"),
                 snap_row("Total Items", total, "#F0F4FF"),
                 snap_row("Low Stock", low_stock, "#EAB308"),
                 snap_row("Out of Stock", out_stock, "#EF4444"),
@@ -247,7 +247,7 @@ class ProductsScreen(ft.Column):
             max_stock = max(reorder * 3, stock, 1)
             bar_ratio = min(stock / max_stock, 1.0)
             bar_fill_w = int(160 * bar_ratio)
-            image_data = get_menu_image_base64(name)
+            image_src = get_menu_image_src(name)
 
             return ft.Container(
                 height=160,
@@ -258,12 +258,12 @@ class ProductsScreen(ft.Column):
                     [
                         (
                             ft.Image(
-                                src_base64=image_data,
+                                src=image_src,
                                 fit=ft.ImageFit.COVER,
                                 width=float("inf"),
                                 height=160,
                             )
-                            if image_data
+                            if image_src
                             else ft.Container(
                                 bgcolor="#1E2535",
                                 width=float("inf"),

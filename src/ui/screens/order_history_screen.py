@@ -252,14 +252,29 @@ class OrderHistoryScreen(ft.Column):
             spacing=8,
         )
 
+    def _table_display_label(self, order: dict) -> str:
+        """Return a stable UI label for the order's service location."""
+        raw_table = str(order.get("table_id") or "").strip()
+        if not raw_table:
+            return "Takeaway"
+        normalized = raw_table.upper()
+        if normalized in {"TAKEAWAY", "TAKE AWAY", "TOGO", "TO-GO"}:
+            return "Takeaway"
+        if normalized.startswith("T") and raw_table[1:].strip().isdigit():
+            return f"Table {raw_table[1:].strip()}"
+        return f"Table {raw_table}"
+
     def _kds_btn(self, label: str, bgcolor: str, color: str, on_click) -> ft.ElevatedButton:
         return ft.ElevatedButton(
             label,
             bgcolor=bgcolor,
             color=color,
-            style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=6)),
+            style=ft.ButtonStyle(
+                shape=ft.RoundedRectangleBorder(radius=6),
+                padding=ft.padding.symmetric(horizontal=8, vertical=0),
+            ),
             expand=True,
-            height=36,
+            height=34,
             on_click=on_click,
         )
 
@@ -334,7 +349,7 @@ class OrderHistoryScreen(ft.Column):
         k_status = (order.get("kitchen_status") or "PENDING").upper()
         if k_status == "PENDING":
             left_btn = self._kds_btn(
-                "▶ Start Cooking",
+                "Start",
                 "#EAB308",
                 "#0A0A0A",
                 lambda e, oid=order["id"]: self._mark_cooking(oid),
@@ -347,7 +362,7 @@ class OrderHistoryScreen(ft.Column):
             )
         elif k_status == "COOKING":
             left_btn = self._kds_btn(
-                "✓ Mark Ready",
+                "Ready",
                 "#22C55E",
                 "#0A0A0A",
                 lambda e, oid=order["id"]: self._mark_ready(oid),
@@ -360,20 +375,20 @@ class OrderHistoryScreen(ft.Column):
             )
         elif k_status == "READY":
             left_btn = self._kds_btn(
-                "✓ Served — Close",
+                "Served",
                 "#3B82F6",
                 "#FFFFFF",
                 lambda e, oid=order["id"]: self._mark_served(oid),
             )
             right_btn = self._kds_btn(
-                "Re-open",
+                "Reopen",
                 "#2D3748",
                 "#9CA3AF",
                 lambda e, oid=order["id"]: self._mark_cooking(oid),
             )
         else:
             left_btn = self._kds_btn(
-                "✓ Mark Ready",
+                "Ready",
                 "#22C55E",
                 "#0A0A0A",
                 lambda e, oid=order["id"]: self._mark_ready(oid),
@@ -400,7 +415,7 @@ class OrderHistoryScreen(ft.Column):
                                 ft.Column(
                                     [
                                         ft.Text(
-                                            f"Table {order.get('table_number') or order.get('table_id', '?')}",
+                                            self._table_display_label(order),
                                             font_family="Syne",
                                             size=18,
                                             weight=ft.FontWeight.W_800,

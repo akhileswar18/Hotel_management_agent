@@ -8,6 +8,7 @@ Three-panel layout:
 """
 
 from datetime import datetime
+import os
 import threading
 from typing import Any, Dict, List, Optional
 
@@ -281,6 +282,8 @@ class ChatScreen(ft.Column):
         self._safe_update(self.agent_rows)
 
     def _provider_card(self) -> ft.Container:
+        provider_name = os.environ.get("LLM_PROVIDER", "openrouter").title()
+        model_name = os.environ.get("LLM_MODEL", "meta-llama/llama-3.3-70b-instruct")
         return ft.Container(
             bgcolor=HMSColors.SURFACE2,
             border=ft.border.all(1, HMSColors.BORDER),
@@ -288,8 +291,8 @@ class ChatScreen(ft.Column):
             padding=10,
             content=ft.Column(
                 [
-                    ft.Text("Provider: Groq", size=12, color=HMSColors.TEXT_PRIMARY),
-                    ft.Text("Model: llama-3.3-70b", size=11, color=HMSColors.TEXT_SECONDARY, font_family="DM Mono"),
+                    ft.Text(f"Provider: {provider_name}", size=12, color=HMSColors.TEXT_PRIMARY),
+                    ft.Text(f"Model: {model_name}", size=11, color=HMSColors.TEXT_SECONDARY, font_family="DM Mono"),
                     ft.Text("Fallback: Rules enabled", size=11, color=HMSColors.TEXT_SECONDARY),
                     ft.Text("Offline-ready", size=11, color=HMSColors.GREEN),
                 ],

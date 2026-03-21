@@ -54,6 +54,7 @@ hms.db
 # Log files
 logs/
 *.log
+*.log*
 
 # Environment (secrets)
 .env

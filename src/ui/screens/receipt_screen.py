@@ -80,7 +80,7 @@ class ReceiptScreen(ft.Column):
         self.card_btn = self._payment_chip("CARD", "💳")
         self.voucher_btn = self._payment_chip("VOUCHER", "🎟")
         self.confirm_btn = ft.ElevatedButton(
-            text="Confirm Payment",
+            "Confirm Payment",
             bgcolor=HMSColors.GREEN,
             color="#FFFFFF",
             height=48,
