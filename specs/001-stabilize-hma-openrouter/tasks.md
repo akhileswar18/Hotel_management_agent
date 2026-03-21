@@ -76,9 +76,9 @@
 - [X] T029 [P] [US1] Add OpenRouter request headers (`HTTP-Referer`, `X-Title`) in `C:\Users\akhil\Hotel_management_agent\src\agents\llm_client.py` and re-validate with `python -m py_compile C:\Users\akhil\Hotel_management_agent\src\agents\llm_client.py`
 - [X] T030 [P] [US1] Update AI provider/model display to environment-driven values in `C:\Users\akhil\Hotel_management_agent\src\ui\screens\chat_screen.py` and validate with `python -m py_compile C:\Users\akhil\Hotel_management_agent\src\ui\screens\chat_screen.py`
 - [X] T031 [P] [US1] Configure runtime provider variables in `C:\Users\akhil\Hotel_management_agent\.env` (`LLM_PROVIDER`, `OPENROUTER_API_KEY`, `LLM_MODEL`, `LLM_TIMEOUT`) with real local key values
-- [ ] T032 [US1] Execute Ask-mode verification from `C:\Users\akhil\Hotel_management_agent\` by restarting `python src\launcher.py` and validating a live AI response on `C:\Users\akhil\Hotel_management_agent\src\ui\screens\chat_screen.py`
+- [X] T032 [US1] Execute Ask-mode verification from `C:\Users\akhil\Hotel_management_agent\` by restarting `python src\launcher.py` and validating a live AI response on `C:\Users\akhil\Hotel_management_agent\src\ui\screens\chat_screen.py`
 - [X] T033 [US1] Execute Command-mode verification from `C:\Users\akhil\Hotel_management_agent\` by issuing a natural-language operational command in AI Agent screen and confirming workflow side-effects in UI
-- [ ] T034 [US1] Execute outage degradation verification by setting invalid key in `C:\Users\akhil\Hotel_management_agent\.env`, restarting from `C:\Users\akhil\Hotel_management_agent\`, and confirming degraded but user-visible AI responses
+- [X] T034 [US1] Execute outage degradation verification by setting invalid key in `C:\Users\akhil\Hotel_management_agent\.env`, restarting from `C:\Users\akhil\Hotel_management_agent\`, and confirming degraded but user-visible AI responses
 
 **Checkpoint**: US1 is independently functional and demonstrable.
 
@@ -124,9 +124,9 @@
 **Purpose**: Final quality gate, regression check, and operational documentation updates.
 
 - [X] T048 Run terminal error sweep during full navigation from `C:\Users\akhil\Hotel_management_agent\` and confirm zero blocking `AttributeError`/`TypeError` tracebacks
-- [ ] T049 Run regression suite from `C:\Users\akhil\Hotel_management_agent\` using `pytest tests/ -x -q` and resolve any introduced failures in touched files
+- [X] T049 Run regression suite from `C:\Users\akhil\Hotel_management_agent\` using `pytest tests/ -x -q` and resolve any introduced failures in touched files
 - [X] T050 Update troubleshooting knowledge in `C:\Users\akhil\Hotel_management_agent\SKILLS.md` with concise entries (error, root cause, fix, files touched, prevention)
-- [ ] T051 Update progress notes in `C:\Users\akhil\Hotel_management_agent\PROGRESS.md` with phase completion checkpoints and final acceptance status
+- [X] T051 Update progress notes in `C:\Users\akhil\Hotel_management_agent\PROGRESS.md` with phase completion checkpoints and final acceptance status
 
 ---
 

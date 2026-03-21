@@ -5,6 +5,7 @@ Dark app shell with custom sidebar and dashboard-first routing.
 """
 
 import os as _os
+from typing import Optional
 
 import flet as ft
 import httpx
@@ -61,17 +62,28 @@ class HMSApp:
         self._show_route("dashboard")
 
     def _init_main_shell(self):
+        kitchen_screen = OrderHistoryScreen(
+            self.page,
+            self.current_user,
+            on_back=lambda: self._show_route("dashboard"),
+        )
         self.screens = {
             "dashboard": DashboardScreen(self.page, self.current_user, on_nav=self._show_route),
-            "pos": POSScreen(self.page, self.current_user, on_logout=self._handle_logout),
+            "pos": POSScreen(
+                self.page,
+                self.current_user,
+                on_logout=self._handle_logout,
+                on_kitchen_update=self._notify_kitchen_update,
+            ),
             "inventory": ProductsScreen(self.page, self.current_user, on_back=lambda: self._show_route("pos")),
             "billing": ReceiptScreen(self.page, user_info=self.current_user, on_back=lambda: self._show_route("pos")),
             "reports": ReportsScreen(self.page, self.current_user, on_back=lambda: self._show_route("pos")),
-            "kitchen": OrderHistoryScreen(self.page, self.current_user, on_back=lambda: self._show_route("dashboard")),
+            "kitchen": kitchen_screen,
             "agent": ChatScreen(
                 self.page,
                 user_role=str(self.current_user.get("role", "WAITER")),
                 user_id=str(self.current_user.get("user_id", "")),
+                on_kitchen_update=self._notify_kitchen_update,
             ),
         }
         self.screens["ai"] = self.screens["agent"]
@@ -302,6 +314,14 @@ class HMSApp:
 
     def _show_chat_screen(self):
         self._show_route("agent")
+
+    def _notify_kitchen_update(self, payload: Optional[dict] = None):
+        kitchen = self.screens.get("kitchen")
+        if not kitchen:
+            return
+        notify = getattr(kitchen, "notify_external_update", None)
+        if callable(notify):
+            notify(payload or {})
 
     def _handle_logout(self):
         self.current_user = None

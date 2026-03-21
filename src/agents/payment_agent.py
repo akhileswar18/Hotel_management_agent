@@ -21,7 +21,7 @@ class PaymentAgent(BaseAgent):
     name = "PaymentAgent"
     subscribes_to = ["payment.process", "order.finalized"]
     publishes = ["payment.completed", "payment.failed", "payment.error"]
-    writes_to_db = False  # SalesService already recorded the payment
+    writes_to_db = True  # Finalization flow persists payment records
     uses_llm = False
 
     def handle(self, event: Event) -> Optional[Event]:

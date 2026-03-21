@@ -1105,7 +1105,10 @@ def create_app() -> FastAPI:
         )
         result = event_bus.publish_sync(event)
         if result.success and result.event and result.event.type == "insight.suggestion":
-            return result.event.payload
+            payload = dict(result.event.payload or {})
+            if payload.get("source") != "llm":
+                payload.setdefault("message", "Insight unavailable")
+            return payload
         return {"suggestions": [], "message": "Insight unavailable"}
 
     @app.post("/api/insights/query")
@@ -1121,7 +1124,10 @@ def create_app() -> FastAPI:
         result = event_bus.publish_sync(event)
         if result.success and result.event:
             if result.event.type == "insight.query_result":
-                return result.event.payload
+                payload = dict(result.event.payload or {})
+                if payload.get("source") != "llm":
+                    payload.setdefault("message", "Insight unavailable")
+                return payload
             if result.event.type == "insight.error":
                 return {"answer": "", "message": result.event.payload.get("message", "Query failed")}
         return {"answer": "", "message": "Could not process the query. Try asking about sales, inventory, or orders."}

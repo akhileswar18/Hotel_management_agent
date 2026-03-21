@@ -23,6 +23,31 @@ if _project_root not in sys.path:
     sys.path.insert(0, _project_root)
 
 
+def _load_env_file() -> None:
+    """Load .env into process environment (simple KEY=VALUE parser)."""
+    env_path = Path(_project_root) / ".env"
+    if not env_path.exists():
+        return
+
+    try:
+        for raw_line in env_path.read_text(encoding="utf-8").splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            key = key.strip()
+            value = value.strip()
+            if not key:
+                continue
+            # Strip matching single/double quote wrappers if present.
+            if len(value) >= 2 and ((value[0] == value[-1]) and value[0] in ("'", '"')):
+                value = value[1:-1]
+            os.environ[key] = value
+    except Exception:
+        # Launcher should remain resilient even if .env has malformed lines.
+        pass
+
+
 def _start_api_server() -> None:
     """Start FastAPI backend in background thread."""
     import uvicorn
@@ -71,6 +96,8 @@ def main() -> None:
     4. Start Flet UI (blocks until window closed)
     """
     from datetime import datetime
+
+    _load_env_file()
 
     print("=" * 60)
     print("  Hotel Management System v1.0")

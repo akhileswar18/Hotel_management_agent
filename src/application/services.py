@@ -908,7 +908,9 @@ class ReportingService:
             Dict with total revenue, transaction count, payment method breakdown, top items
         """
         if report_date is None:
-            report_date = date.today()
+            # Orders/payments are persisted with UTC timestamps, so default summaries
+            # should use UTC date boundaries to avoid local-time skew.
+            report_date = datetime.utcnow().date()
 
         target_dt = datetime(report_date.year, report_date.month, report_date.day)
 
@@ -1020,7 +1022,7 @@ class ReportingService:
         query = """
             SELECT o.id, o.table_id, o.status, o.subtotal_cents, o.discount_cents,
                    o.tax_cents, o.total_cents, o.receipt_number, o.finalized_at, o.created_at,
-                   p.payment_method, p.amount_cents as paid_cents
+                   p.method as payment_method, p.amount_cents as paid_cents
             FROM orders o
             LEFT JOIN payments p ON o.id = p.order_id
             WHERE o.status = 'finalized'
@@ -1033,7 +1035,7 @@ class ReportingService:
             query += " AND DATE(o.finalized_at) <= DATE(?)"
             params.append(end_date)
         if payment_method:
-            query += " AND p.payment_method = ?"
+            query += " AND p.method = ?"
             params.append(payment_method)
         query += " ORDER BY o.finalized_at DESC"
 
