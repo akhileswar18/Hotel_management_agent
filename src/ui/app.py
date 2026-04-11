@@ -5,7 +5,7 @@ Dark app shell with custom sidebar and dashboard-first routing.
 """
 
 import os as _os
-from typing import Optional
+from typing import Callable, Optional
 
 import flet as ft
 import httpx
@@ -19,7 +19,45 @@ from src.ui.screens.products_screen import ProductsScreen
 from src.ui.screens.receipt_screen import ReceiptScreen
 from src.ui.screens.reports_screen import ReportsScreen
 from src.ui.screens.order_history_screen import OrderHistoryScreen
+from src.ui.screens.chat_order_screen import ChatOrderScreen
+from src.ui.screens.order_confirmation_screen import OrderConfirmationScreen
 from src.ui.screens.chat_screen import ChatScreen
+
+
+_ORDER_LISTENERS: dict[str, Callable[[dict], None]] = {}
+
+
+def register_order_listener(listener_id: str, callback: Callable[[dict], None]) -> None:
+    """Register or replace an in-process order-change listener."""
+    if not listener_id or not callable(callback):
+        return
+    _ORDER_LISTENERS[listener_id] = callback
+
+
+def unregister_order_listener(listener_id: str) -> None:
+    """Remove an in-process order-change listener if present."""
+    if not listener_id:
+        return
+    _ORDER_LISTENERS.pop(listener_id, None)
+
+
+def notify_order_change(
+    event_type: str,
+    payload: Optional[dict] = None,
+    source_screen: Optional[str] = None,
+) -> None:
+    """Best-effort fan-out for UI order-change listeners."""
+    event = {
+        "event_type": str(event_type or "order.updated"),
+        "source_screen": str(source_screen or "unknown"),
+        "payload": payload or {},
+    }
+    for listener in list(_ORDER_LISTENERS.values()):
+        try:
+            listener(event)
+        except Exception:
+            # Listener failures must never block the caller or other listeners.
+            pass
 
 
 class HMSApp:
@@ -28,7 +66,7 @@ class HMSApp:
     def __init__(self, page: ft.Page):
         self.page = page
         set_language("en")
-        self.page.title = "Hotel Management System"
+        self.page.title = "HMA Hotel Management Agent"
         self.page.theme_mode = ft.ThemeMode.DARK
         self.page.bgcolor = HMSColors.BG
         self.page.padding = 0
@@ -66,6 +104,8 @@ class HMSApp:
             self.page,
             self.current_user,
             on_back=lambda: self._show_route("dashboard"),
+            register_order_listener=register_order_listener,
+            unregister_order_listener=unregister_order_listener,
         )
         self.screens = {
             "dashboard": DashboardScreen(self.page, self.current_user, on_nav=self._show_route),
@@ -74,16 +114,29 @@ class HMSApp:
                 self.current_user,
                 on_logout=self._handle_logout,
                 on_kitchen_update=self._notify_kitchen_update,
+                on_order_change=self._notify_order_change,
             ),
             "inventory": ProductsScreen(self.page, self.current_user, on_back=lambda: self._show_route("pos")),
-            "billing": ReceiptScreen(self.page, user_info=self.current_user, on_back=lambda: self._show_route("pos")),
+            "billing": ReceiptScreen(
+                self.page,
+                user_info=self.current_user,
+                on_back=lambda: self._show_route("pos"),
+                register_order_listener=register_order_listener,
+                unregister_order_listener=unregister_order_listener,
+            ),
             "reports": ReportsScreen(self.page, self.current_user, on_back=lambda: self._show_route("pos")),
             "kitchen": kitchen_screen,
+            "chat_order": ChatOrderScreen(
+                self.page,
+                user_id=str(self.current_user.get("user_id", "")),
+                on_show_confirmation=self._show_order_confirmation,
+            ),
             "agent": ChatScreen(
                 self.page,
                 user_role=str(self.current_user.get("role", "WAITER")),
                 user_id=str(self.current_user.get("user_id", "")),
                 on_kitchen_update=self._notify_kitchen_update,
+                on_order_change=self._notify_order_change,
             ),
         }
         self.screens["ai"] = self.screens["agent"]
@@ -315,6 +368,23 @@ class HMSApp:
     def _show_chat_screen(self):
         self._show_route("agent")
 
+    def _show_chat_order_screen(self):
+        self._show_route("chat_order")
+
+    def _show_order_confirmation(self, intent: dict):
+        self.screens["order_confirmation"] = OrderConfirmationScreen(
+            self.page,
+            intent=intent,
+            user_id=str(self.current_user.get("user_id", "")),
+            on_back=self._show_chat_order_screen,
+            on_order_change=lambda event_type, payload: self._notify_order_change(
+                event_type,
+                payload,
+                source_screen="chat_confirmation",
+            ),
+        )
+        self._show_route("order_confirmation")
+
     def _notify_kitchen_update(self, payload: Optional[dict] = None):
         kitchen = self.screens.get("kitchen")
         if not kitchen:
@@ -322,6 +392,9 @@ class HMSApp:
         notify = getattr(kitchen, "notify_external_update", None)
         if callable(notify):
             notify(payload or {})
+
+    def _notify_order_change(self, event_type: str, payload: Optional[dict] = None, source_screen: str = "app"):
+        notify_order_change(event_type, payload, source_screen)
 
     def _handle_logout(self):
         self.current_user = None

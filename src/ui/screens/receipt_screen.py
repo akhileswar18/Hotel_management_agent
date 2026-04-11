@@ -31,11 +31,16 @@ class ReceiptScreen(ft.Column):
         on_continue=None,
         user_info: Optional[dict] = None,
         on_back=None,
+        register_order_listener=None,
+        unregister_order_listener=None,
     ):
         self._page = page
         self.user_info = user_info or {}
         self.on_continue = on_continue
         self.on_back = on_back
+        self._register_order_listener = register_order_listener
+        self._unregister_order_listener = unregister_order_listener
+        self._order_listener_id = f"billing:{id(self)}"
         self.api_base = "http://127.0.0.1:8000"
 
         self.payment_method = "CASH"
@@ -194,6 +199,8 @@ class ReceiptScreen(ft.Column):
                 self._populate_bill_summary(self.selected_order)
                 self._set_confirm_enabled(True)
                 self._rebuild_table_chips()
+        if callable(self._register_order_listener):
+            self._register_order_listener(self._order_listener_id, self.notify_external_update)
 
     def _surface_card(self, content: ft.Control, padding: int = 14) -> ft.Container:
         return ft.Container(
@@ -523,6 +530,29 @@ class ReceiptScreen(ft.Column):
             self.recent_orders = []
         self._render_recent()
 
+    def notify_external_update(self, event: Optional[dict] = None):
+        """Refresh billing data in response to successful order-change events."""
+        event_type = str((event or {}).get("event_type") or "order.updated")
+        self._load_draft_orders()
+        if event_type in {"order.finalized", "order.voided"}:
+            self._load_recent()
+        try:
+            self._render_preview()
+        except Exception:
+            pass
+        try:
+            self._page.update()
+        except Exception:
+            pass
+
+    def on_show(self):
+        self._load_draft_orders()
+        self._load_recent()
+        try:
+            self._page.update()
+        except Exception:
+            pass
+
     def _render_recent(self):
         self.recent_list.controls.clear()
         if not self.recent_orders:
@@ -716,3 +746,7 @@ class ReceiptScreen(ft.Column):
             self.on_back()
         elif callable(self.on_continue):
             self.on_continue()
+
+    def cleanup(self):
+        if callable(self._unregister_order_listener):
+            self._unregister_order_listener(self._order_listener_id)

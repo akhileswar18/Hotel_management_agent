@@ -37,6 +37,7 @@ class ChatScreen(ft.Column):
         user_id: str = "",
         user_info: Optional[dict] = None,
         on_kitchen_update: Optional[Callable[[dict], None]] = None,
+        on_order_change: Optional[Callable[[str, dict], None]] = None,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -49,6 +50,7 @@ class ChatScreen(ft.Column):
             "user_id": self.user_id,
         }
         self._on_kitchen_update = on_kitchen_update
+        self._on_order_change = on_order_change
 
         self.expand = True
         self.mode = "ask"  # ask | command | voice
@@ -534,6 +536,9 @@ class ChatScreen(ft.Column):
                 trace = self._build_trace_steps("command", "success", {"engine": parsed_by, "action": intent.get("action", "unknown")})
                 self._append_agent_message(message, ok=True, trace_steps=trace)
                 self._mark_agent_activity(["OrchestratorAgent", "OrderAgent", "PaymentAgent", "AuditAgent"])
+                event_type = self._map_action_to_order_event(intent.get("action"))
+                if event_type:
+                    self._emit_order_change(event_type, data)
                 self._emit_kitchen_update(data)
             elif status == "error":
                 self._pending_intent = None
@@ -557,6 +562,25 @@ class ChatScreen(ft.Column):
             self._on_kitchen_update(payload or {})
         except Exception:
             pass
+
+    def _emit_order_change(self, event_type: str, payload: Optional[dict] = None):
+        if not self._on_order_change:
+            return
+        try:
+            self._on_order_change(event_type, payload or {})
+        except Exception:
+            pass
+
+    @staticmethod
+    def _map_action_to_order_event(action: Optional[str]) -> Optional[str]:
+        action_name = str(action or "").lower()
+        mapping = {
+            "create_order": "order.created",
+            "finalize_order": "order.finalized",
+            "void_order": "order.voided",
+            "add_item": "order.updated",
+        }
+        return mapping.get(action_name)
 
     def _build_followup_chips(self, missing_fields: List[str], intent: Dict[str, Any]) -> List[str]:
         chips: List[str] = []
@@ -694,3 +718,8 @@ class ChatScreen(ft.Column):
             self._page.update()
         except Exception:
             pass
+
+    def cleanup(self):
+        if self._event_refresh_timer:
+            self._event_refresh_timer.cancel()
+            self._event_refresh_timer = None

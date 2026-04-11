@@ -23,6 +23,7 @@ class OrderConfirmationScreen(ft.Column):
         intent: dict,
         user_id: str = "",
         on_back: Optional[Callable[[], None]] = None,
+        on_order_change: Optional[Callable[[str, dict], None]] = None,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -30,6 +31,7 @@ class OrderConfirmationScreen(ft.Column):
         self._intent = deepcopy(intent)
         self.user_id = user_id
         self.on_back = on_back or (lambda: None)
+        self._on_order_change = on_order_change
         self.expand = True
 
         self._table_id = intent.get("table_id") or "1"
@@ -200,6 +202,11 @@ class OrderConfirmationScreen(ft.Column):
             message = data.get("message", "Failed to create order")
 
             if status == "success":
+                if callable(self._on_order_change):
+                    try:
+                        self._on_order_change("order.created", data)
+                    except Exception:
+                        pass
                 show_success_dialog(self._page, "Order Created", message)
                 self.on_back()
             else:

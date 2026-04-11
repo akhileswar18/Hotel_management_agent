@@ -17,11 +17,23 @@ from src.ui.components.ui_helpers import HMSColors
 class OrderHistoryScreen(ft.Column):
     """Kitchen Display System board."""
 
-    def __init__(self, page: ft.Page, user_info: Optional[dict], on_back: Callable[[], None]):
+    ACTIVE_ORDER_STATUSES = {"draft", "finalized"}
+
+    def __init__(
+        self,
+        page: ft.Page,
+        user_info: Optional[dict],
+        on_back: Callable[[], None],
+        register_order_listener: Optional[Callable[[str, Callable[[dict], None]], None]] = None,
+        unregister_order_listener: Optional[Callable[[str], None]] = None,
+    ):
         self.page = page
         self._page = page
         self.user_info = user_info or {}
         self.on_back = on_back
+        self._register_order_listener = register_order_listener
+        self._unregister_order_listener = unregister_order_listener
+        self._order_listener_id = f"kitchen:{id(self)}"
         self.api_url = "http://127.0.0.1:8000"
         self._orders: list[dict] = []
         self._refresh_timer: Optional[threading.Timer] = None
@@ -83,6 +95,8 @@ class OrderHistoryScreen(ft.Column):
         self._render_orders()
         self._update_clock()
         self._schedule_refresh()
+        if callable(self._register_order_listener):
+            self._register_order_listener(self._order_listener_id, self.notify_external_update)
 
     def _build_header(self) -> ft.Container:
         return ft.Container(
@@ -99,6 +113,11 @@ class OrderHistoryScreen(ft.Column):
                     self._ready_badge,
                     ft.Container(expand=True),
                     ft.Text("AUTO REFRESH: 30s", size=11, color="#4B5675", font_family="DM Mono"),
+                    ft.TextButton(
+                        "Mark All Served",
+                        on_click=lambda e: self._confirm_mark_all_served(),
+                        style=ft.ButtonStyle(color="#FCA5A5"),
+                    ),
                     ft.TextButton(
                         "Refresh",
                         on_click=lambda e: self._refresh(),
@@ -185,11 +204,12 @@ class OrderHistoryScreen(ft.Column):
     def _load_orders(self):
         try:
             with httpx.Client(base_url=self.api_url, timeout=5.0) as client:
-                response = client.get("/api/sales/orders", params={"status": "finalized"})
+                response = client.get("/api/sales/orders")
                 if response.status_code == 200:
                     all_orders = response.json()
                     self._orders = [
                         order for order in all_orders
+                        if str(order.get("status") or "").lower() in self.ACTIVE_ORDER_STATUSES
                         if (order.get("kitchen_status") or "PENDING").upper() != "SERVED"
                     ]
                     self._orders.sort(key=lambda o: o.get("created_at", ""))
@@ -577,6 +597,73 @@ class OrderHistoryScreen(ft.Column):
         except Exception as ex:
             self._show_snack(f"Error: {str(ex)[:60]}", error=True)
 
+    def _confirm_mark_all_served(self):
+        if not self._orders:
+            self._show_snack("No visible KDS orders to clear.", error=True)
+            return
+
+        def _close_dialog(_=None):
+            if self.page.dialog:
+                self.page.dialog.open = False
+                try:
+                    self.page.update()
+                except Exception:
+                    pass
+
+        dialog = ft.AlertDialog(
+            modal=True,
+            title=ft.Text("Mark all visible orders as served?"),
+            content=ft.Text(
+                "This will mark every currently visible KDS ticket as served and remove it from the board."
+            ),
+            actions=[
+                ft.TextButton("Cancel", on_click=_close_dialog),
+                ft.TextButton(
+                    "Mark All Served",
+                    on_click=lambda e: (self._mark_all_served(), _close_dialog()),
+                    style=ft.ButtonStyle(color="#EF4444"),
+                ),
+            ],
+            actions_alignment=ft.MainAxisAlignment.END,
+        )
+        self.page.dialog = dialog
+        dialog.open = True
+        try:
+            self.page.update()
+        except Exception:
+            pass
+
+    def _mark_all_served(self):
+        visible_order_ids = [str(order.get("id")) for order in self._orders if order.get("id")]
+        if not visible_order_ids:
+            self._show_snack("No visible KDS orders to clear.", error=True)
+            return
+
+        updated_count = 0
+        try:
+            with httpx.Client(base_url="http://127.0.0.1:8000", timeout=5.0) as client:
+                for order_id in visible_order_ids:
+                    resp = client.patch(
+                        f"/api/sales/orders/{order_id}/kitchen-status",
+                        json={"kitchen_status": "SERVED"},
+                    )
+                    if resp.status_code == 200:
+                        updated_count += 1
+            self._load_orders()
+            self._rebuild_grid()
+            self._page.update()
+            if updated_count == len(visible_order_ids):
+                self._show_snack(f"Marked {updated_count} orders as served.")
+            elif updated_count > 0:
+                self._show_snack(
+                    f"Marked {updated_count} of {len(visible_order_ids)} orders as served.",
+                    error=True,
+                )
+            else:
+                self._show_snack("Failed to mark any orders as served.", error=True)
+        except Exception as ex:
+            self._show_snack(f"Error: {str(ex)[:60]}", error=True)
+
     def _bump_order(self, order_id: str):
         for index, order in enumerate(self._orders):
             if str(order.get("id")) == str(order_id):
@@ -630,6 +717,8 @@ class OrderHistoryScreen(ft.Column):
             pass
 
     def cleanup(self):
+        if callable(self._unregister_order_listener):
+            self._unregister_order_listener(self._order_listener_id)
         if self._refresh_timer:
             self._refresh_timer.cancel()
             self._refresh_timer = None

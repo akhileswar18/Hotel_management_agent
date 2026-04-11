@@ -961,3 +961,27 @@ All code is marked with `# TODO:` comments for Phase 2 work.
    - Fix: Wired shared `on_kitchen_update` callback through `HMSApp` into both `POSScreen` and `ChatScreen`, and added `OrderHistoryScreen.notify_external_update()` to force KDS reload.
    - Files touched: `src/ui/app.py`, `src/ui/screens/chat_screen.py`, `src/ui/screens/order_history_screen.py`.
    - Prevention: Any flow that mutates order lifecycle must emit one common kitchen-refresh signal, not screen-local refresh logic.
+56. **UI Branding and Cashier Identity Drifted From Requested Labels**:
+   - Error: The UI still showed `HMS`/`Hotel Management` branding and displayed cashier name as `Rajesh`.
+   - Root cause: Shared header, login screen, and dashboard fallback labels were still hardcoded to older product/name values.
+   - Fix: Renamed visible UI branding to `HMA` / `Hotel Management Agent`, aligned app title strings, and changed cashier display defaults from `Rajesh` to `Sai`.
+   - Files touched: `src/ui/app.py`, `src/ui/i18n.py`, `src/ui/components/ui_helpers.py`, `src/ui/screens/auth_screen.py`, `src/ui/screens/dashboard_screen.py`.
+   - Prevention: Keep user-facing product labels and seeded display names centralized or reviewed together when branding/persona copy changes.
+57. **Chat-Originated Orders Did Not Sync Across KDS and Billing Screens**:
+   - Error: Chat-created/finalized/voided orders appeared in KDS or Billing only after navigation or timer refresh.
+   - Root cause: UI screens refreshed in isolation; KDS had a narrow callback path, Billing had no external refresh hook, and chat/POS broadcasters did not emit one shared order-change signal.
+   - Fix: Added a shared in-process order-listener registry in `src/ui/app.py`, registered KDS/Billing listeners, added Billing `notify_external_update()`, and broadcast typed order events from chat/order-confirmation/POS success paths while keeping legacy kitchen callbacks for compatibility.
+   - Files touched: `src/ui/app.py`, `src/ui/screens/order_history_screen.py`, `src/ui/screens/receipt_screen.py`, `src/ui/screens/order_confirmation_screen.py`, `src/ui/screens/chat_screen.py`, `src/ui/screens/pos_screen.py`, `specs/001-chat-order-sync/*`.
+   - Prevention: Any order lifecycle mutation should publish a shared UI order-change event and target screens should refresh through idempotent listener hooks rather than relying on navigation or timers alone.
+58. **KDS Only Loaded Finalized Orders, So New Kitchen Tickets Were Invisible**:
+   - Error: Newly created chat/POS orders refreshed Billing but did not appear in KDS until after finalization.
+   - Root cause: `OrderHistoryScreen._load_orders()` queried `/api/sales/orders?status=finalized`, while kitchen workflows begin when orders are still `draft`.
+   - Fix: Changed KDS to load all orders and filter locally to active kitchen statuses (`draft`, `finalized`) while still excluding `SERVED` kitchen tickets.
+   - Files touched: `src/ui/screens/order_history_screen.py`.
+   - Prevention: KDS data filters should follow kitchen-operational states, not just payment/finalization states used by Billing and receipts.
+59. **KDS Needed a Safe Bulk-Clear Action for Backlogged Tickets**:
+   - Error: Kitchen Display could accumulate too many visible tickets with only one-by-one `Served` actions available.
+   - Root cause: `OrderHistoryScreen` exposed per-ticket status changes but no bulk action for the current visible board state.
+   - Fix: Added a header-level `Mark All Served` action with confirmation that marks every currently visible KDS ticket as `SERVED` through the existing kitchen-status endpoint, then reloads the board.
+   - Files touched: `src/ui/screens/order_history_screen.py`.
+   - Prevention: When adding operator-heavy queue screens, include a guarded bulk action for the most common repetitive maintenance step instead of forcing only per-item updates.

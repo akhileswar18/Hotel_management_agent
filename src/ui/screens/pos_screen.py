@@ -40,12 +40,14 @@ class POSScreen(ft.Column):
         user_info: dict,
         on_logout,
         on_kitchen_update: Optional[Callable[[dict], None]] = None,
+        on_order_change: Optional[Callable[[str, dict], None]] = None,
     ):
         self._page = page
         self.user_info = user_info
         self.on_logout = on_logout
         self.api_base = "http://127.0.0.1:8000"
         self._on_kitchen_update = on_kitchen_update
+        self._on_order_change = on_order_change
 
         # Current order state
         self.current_order = None
@@ -458,6 +460,18 @@ class POSScreen(ft.Column):
         except Exception:
             pass
 
+    def _emit_order_change(self, event_type: str, payload: Optional[dict] = None):
+        """Broadcast order changes to any active order listeners."""
+        if not self._on_order_change:
+            return
+        order_payload = payload or self.current_order
+        if not order_payload:
+            return
+        try:
+            self._on_order_change(event_type, order_payload)
+        except Exception:
+            pass
+
     def _handle_new_order(self, e):
         """Create new order."""
         table_id = self.table_id_field.value.strip()
@@ -475,6 +489,7 @@ class POSScreen(ft.Column):
                     self.current_order = response.json()
                     self.current_order_items = []
                     self._update_order_display()
+                    self._emit_order_change("order.created")
                     self._emit_kitchen_update()
                     self.discount_button.disabled = False
                     self.finalize_button.disabled = False
@@ -502,6 +517,7 @@ class POSScreen(ft.Column):
                 if response.status_code == 200:
                     self.current_order = response.json()
                     self._update_order_display()
+                    self._emit_order_change("order.updated")
                     self._emit_kitchen_update()
                     self._page.update()
                 else:
@@ -567,6 +583,7 @@ class POSScreen(ft.Column):
                     if response.status_code == 200:
                         self.current_order = response.json()
                         self._update_order_display()
+                        self._emit_order_change("order.updated")
                         self._emit_kitchen_update()
                         self._page.update()
                         show_success_dialog(self.page, "Discount Applied",
@@ -649,6 +666,7 @@ class POSScreen(ft.Column):
                     )
                     if response.status_code == 200:
                         data = response.json()
+                        self._emit_order_change("order.finalized", data)
                         self._emit_kitchen_update(data)
                         self.current_order = None
                         self._update_order_display()
@@ -745,6 +763,7 @@ class POSScreen(ft.Column):
                     )
                     if response.status_code == 200:
                         voided_payload = response.json()
+                        self._emit_order_change("order.voided", voided_payload)
                         self._emit_kitchen_update(voided_payload)
                         show_success_dialog(self.page, "Order Voided",
                             f"Order has been voided.\nReason: {reason}")
@@ -797,6 +816,7 @@ class POSScreen(ft.Column):
                 )
                 if response.status_code == 200:
                     held_payload = response.json()
+                    self._emit_order_change("order.updated", held_payload)
                     self._emit_kitchen_update(held_payload)
                     show_success_dialog(self.page, "Order Held", "Order has been put on hold.")
                     self.current_order = None
@@ -862,6 +882,7 @@ class POSScreen(ft.Column):
                     if response.status_code == 200:
                         self.current_order = response.json()
                         self._update_order_display()
+                        self._emit_order_change("order.updated")
                         self._emit_kitchen_update()
                         self.discount_button.disabled = False
                         self.finalize_button.disabled = False
@@ -924,6 +945,7 @@ class POSScreen(ft.Column):
                     if response.status_code == 200:
                         self.current_order = response.json()
                         self._update_order_display()
+                        self._emit_order_change("order.updated")
                         self._emit_kitchen_update()
                         self._page.update()
                     else:
@@ -1044,6 +1066,9 @@ class POSScreen(ft.Column):
                                         self.hold_button.disabled = False
                                 except Exception:
                                     pass
+                            event_type = self._map_action_to_order_event(intent.get("action"))
+                            if event_type:
+                                self._emit_order_change(event_type, data)
 
                             self._voice_result.controls = [
                                 ft.Text(message, size=13, color=HMSColors.SUCCESS),
@@ -1118,6 +1143,7 @@ class POSScreen(ft.Column):
                 if response.status_code == 200:
                     self.current_order = response.json()
                     self._update_order_display()
+                    self._emit_order_change("order.updated")
                     self._emit_kitchen_update()
                     self._page.update()
                 else:
@@ -1185,6 +1211,17 @@ class POSScreen(ft.Column):
                 tax=0.0,
                 total=0.0,
             )
+
+    @staticmethod
+    def _map_action_to_order_event(action: Optional[str]) -> Optional[str]:
+        action_name = str(action or "").lower()
+        mapping = {
+            "create_order": "order.created",
+            "finalize_order": "order.finalized",
+            "void_order": "order.voided",
+            "add_item": "order.updated",
+        }
+        return mapping.get(action_name)
 
 
 # TODO: Add voice/STT integration (future)
